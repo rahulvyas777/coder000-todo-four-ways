@@ -1,9 +1,9 @@
-import { Component, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
 import { httpResource } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter, firstValueFrom, map } from 'rxjs';
-import { API_URL, Api, TaskItem } from './api';
+import { API_URL, Api, Subtask, TaskItem } from './api';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
 import { TaskChanges, TaskPanel } from './task-panel';
@@ -97,6 +97,7 @@ export class ListView {
   private readonly store = inject(ListsStore);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   readonly listId = input.required({ transform: numberAttribute });
 
@@ -236,6 +237,8 @@ export class ListView {
 
   protected startEdit(id: number): void {
     this.editingId.set(id);
+    // Render the editor now so it has focus before the next keystroke, not a frame later.
+    this.cdr.detectChanges();
   }
 
   protected cancelEdit(): void {
@@ -354,6 +357,32 @@ export class ListView {
     }
   }
 
+  protected async addSubtask(task: TaskItem, title: string): Promise<void> {
+    const subtask = await firstValueFrom(this.api.createSubtask(task.id, title));
+    this.updateSubtasks(task.id, (ss) => [...ss, subtask]);
+  }
+
+  /** Subtasks never complete or reopen their task; only the subtask changes. */
+  protected async toggleSubtask(task: TaskItem, subtask: Subtask): Promise<void> {
+    const done = !subtask.done;
+    this.updateSubtasks(task.id, (ss) => ss.map((s) => (s.id === subtask.id ? { ...s, done } : s)));
+    try {
+      const saved = await firstValueFrom(this.api.updateSubtask(subtask.id, { done }));
+      this.updateSubtasks(task.id, (ss) => ss.map((s) => (s.id === saved.id ? saved : s)));
+    } catch {
+      this.updateSubtasks(task.id, (ss) => ss.map((s) => (s.id === subtask.id ? subtask : s)));
+    }
+  }
+
+  protected async deleteSubtask(task: TaskItem, subtask: Subtask): Promise<void> {
+    await firstValueFrom(this.api.deleteSubtask(subtask.id));
+    this.updateSubtasks(task.id, (ss) => ss.filter((s) => s.id !== subtask.id));
+  }
+
+  protected doneCount(task: TaskItem): number {
+    return task.subtasks.filter((s) => s.done).length;
+  }
+
   /** Short local date for the rows, e.g. "Nov 7" (the year only when it is not this year). */
   protected formatDue(iso: string): string {
     const [y, m, d] = iso.split('-').map(Number);
@@ -381,6 +410,12 @@ export class ListView {
 
   private replace(task: TaskItem): void {
     this.tasksResource.update((ts) => (ts ?? []).map((t) => (t.id === task.id ? task : t)));
+  }
+
+  private updateSubtasks(taskId: number, change: (subtasks: Subtask[]) => Subtask[]): void {
+    this.tasksResource.update((ts) =>
+      (ts ?? []).map((t) => (t.id === taskId ? { ...t, subtasks: change(t.subtasks) } : t)),
+    );
   }
 
   /** The sidebar counts come from the server. */

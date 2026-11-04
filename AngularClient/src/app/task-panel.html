@@ -74,3 +74,39 @@
     <option [value]="r.value" [selected]="r.value === t.repeat">{{ r.label }}</option>
   }
 </select>
+
+<label for="subtask-add-input">Subtasks</label>
+<ul class="subtasks" aria-label="Subtasks">
+  @for (s of t.subtasks; track s.id) {
+    <li class="subtask-row" [class.done]="s.done" [attr.data-testid]="'subtask-row-' + s.id">
+      <input
+        type="checkbox"
+        [attr.data-testid]="'subtask-check-' + s.id"
+        [attr.aria-label]="'Done: ' + s.title"
+        [checked]="s.done"
+        (change)="toggleSubtask.emit(s)"
+      />
+      <span class="subtask-title">{{ s.title }}</span>
+      <button
+        type="button"
+        class="btn-icon btn-danger"
+        [attr.data-testid]="'subtask-delete-' + s.id"
+        [attr.aria-label]="'Delete subtask ' + s.title"
+        title="Delete"
+        (click)="deleteSubtask.emit(s)"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+      </button>
+    </li>
+  }
+</ul>
+<input
+  #subtaskInput
+  id="subtask-add-input"
+  type="text"
+  class="subtask-add"
+  data-testid="subtask-add-input"
+  placeholder="Add a subtask"
+  maxlength="200"
+  (keydown.enter)="submitSubtask(subtaskInput)"
+/>

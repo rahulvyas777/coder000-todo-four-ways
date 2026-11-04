@@ -89,4 +89,16 @@ export class Api {
   reorderTasks(listId: number, orderedIds: number[]): Observable<void> {
     return this.http.post<void>(`${API_URL}/api/tasks/reorder`, { listId, orderedIds });
   }
+
+  createSubtask(taskId: number, title: string): Observable<Subtask> {
+    return this.http.post<Subtask>(`${API_URL}/api/tasks/${taskId}/subtasks`, { title });
+  }
+
+  updateSubtask(id: number, changes: Partial<Pick<Subtask, 'title' | 'done' | 'position'>>): Observable<Subtask> {
+    return this.http.patch<Subtask>(`${API_URL}/api/subtasks/${id}`, changes);
+  }
+
+  deleteSubtask(id: number): Observable<void> {
+    return this.http.delete<void>(`${API_URL}/api/subtasks/${id}`);
+  }
 }

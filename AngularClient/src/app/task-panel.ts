@@ -1,5 +1,5 @@
 import { Component, ElementRef, inject, input, output } from '@angular/core';
-import { Repeat, TaskItem } from './api';
+import { Repeat, Subtask, TaskItem } from './api';
 
 export type TaskChanges = Partial<Pick<TaskItem, 'title' | 'notes' | 'dueDate' | 'priority' | 'tags' | 'repeat'>>;
 
@@ -20,6 +20,9 @@ export class TaskPanel {
   readonly task = input.required<TaskItem>();
   readonly save = output<TaskChanges>();
   readonly closed = output<void>();
+  readonly addSubtask = output<string>();
+  readonly toggleSubtask = output<Subtask>();
+  readonly deleteSubtask = output<Subtask>();
 
   protected readonly priorities = [
     { value: 0, label: 'None' },
@@ -85,5 +88,11 @@ export class TaskPanel {
 
   protected removeTag(tag: string): void {
     this.save.emit({ tags: this.task().tags.filter((t) => t !== tag) });
+  }
+
+  protected submitSubtask(field: HTMLInputElement): void {
+    const title = field.value.trim();
+    field.value = '';
+    if (title) this.addSubtask.emit(title);
   }
 }

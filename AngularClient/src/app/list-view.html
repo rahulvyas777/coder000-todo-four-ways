@@ -115,6 +115,14 @@
           @for (tag of task.tags; track tag) {
             <span class="tag" [attr.data-testid]="'task-tag-' + task.id + '-' + tag">{{ tag }}</span>
           }
+          @if (task.subtasks.length > 0) {
+            <span
+              class="subtask-progress"
+              [attr.data-testid]="'subtask-progress-' + task.id"
+              [attr.title]="doneCount(task) + ' of ' + task.subtasks.length + ' subtasks done'"
+              >{{ doneCount(task) }}/{{ task.subtasks.length }}</span
+            >
+          }
           @if (task.dueDate) {
             <time class="task-due" [attr.data-testid]="'task-due-' + task.id" [attr.datetime]="task.dueDate">{{
               formatDue(task.dueDate)
@@ -145,5 +153,12 @@
   </div>
 </div>
 @if (openTask(); as t) {
-  <app-task-panel [task]="t" (save)="saveDetails(t, $event)" (closed)="closePanel()" />
+  <app-task-panel
+    [task]="t"
+    (save)="saveDetails(t, $event)"
+    (closed)="closePanel()"
+    (addSubtask)="addSubtask(t, $event)"
+    (toggleSubtask)="toggleSubtask(t, $event)"
+    (deleteSubtask)="deleteSubtask(t, $event)"
+  />
 }
