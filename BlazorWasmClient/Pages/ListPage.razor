@@ -24,6 +24,17 @@
                placeholder="Add a task" aria-label="New task title" data-testid="task-add-input"
                @onkeydown="OnAddKey" />
     </div>
+    <div class="toolbar">
+        <div class="filter-bar" role="group" aria-label="Filter tasks">
+            @foreach (var (view, label) in Views)
+            {
+                <button type="button" class="filter@(view == View ? " active" : "")" data-testid="filter-@view"
+                        aria-pressed="@(view == View ? "true" : "false")" @onclick="() => SetView(view)">
+                    @label <span class="count">@_tasks.Count(t => Matches(t, view))</span>
+                </button>
+            }
+        </div>
+    </div>
 }
 @if (_actionError is not null)
 {
@@ -39,13 +50,13 @@
     {
         <p class="empty-state">Loading…</p>
     }
-    else if (_tasks.Count == 0)
+    else if (!_tasks.Any(t => Matches(t, View)))
     {
         <p class="empty-state">Nothing here</p>
     }
     else
     {
-        @foreach (var task in _tasks)
+        @foreach (var task in _tasks.Where(t => Matches(t, View)))
         {
             <div class="@RowClass(task)" role="listitem"
                  data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)">
@@ -158,6 +169,8 @@
     private int _loadedListId;
     private int _loadVersion;
 
+    [SupplyParameterFromQuery(Name = "view")] public string? ViewParam { get; set; }
+
     private TaskList? List => State.FindList(ListId);
     private int OpenCount => _tasks?.Count(t => !t.Completed) ?? 0;
 
@@ -202,6 +215,29 @@
     private ElementReference _editInput;
     private bool _focusEdit;
     private string? _actionError;
+
+    // ---- Filters (?view=) ----
+
+    private static readonly (string View, string Label)[] Views =
+        [("all", "All"), ("today", "Today"), ("upcoming", "Upcoming"), ("overdue", "Overdue"), ("completed", "Completed")];
+
+    // A missing or unknown view is All.
+    private string View => Views.Any(v => v.View == ViewParam) ? ViewParam! : "all";
+
+    private static string TodayIso => DateTime.Today.ToString("yyyy-MM-dd");
+
+    // All and Overdue are open tasks only; Today and Upcoming go by the due date alone.
+    private static bool Matches(TaskItem task, string view) => view switch
+    {
+        "today" => task.DueDate == TodayIso,
+        "upcoming" => task.DueDate is not null && string.CompareOrdinal(task.DueDate, TodayIso) > 0,
+        "overdue" => IsOverdue(task),
+        "completed" => task.Completed,
+        _ => !task.Completed,
+    };
+
+    private void SetView(string view) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("view", view == "all" ? null : view));
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -330,7 +366,7 @@
 
     private static bool IsOverdue(TaskItem task) =>
         !task.Completed && task.DueDate is not null
-        && string.CompareOrdinal(task.DueDate, DateTime.Today.ToString("yyyy-MM-dd")) < 0;
+        && string.CompareOrdinal(task.DueDate, TodayIso) < 0;
 
     private static string FormatDue(string dueDate) =>
         DateOnly.TryParseExact(dueDate, "yyyy-MM-dd", out var d)
