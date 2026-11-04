@@ -8,6 +8,7 @@
 @inject IJSRuntime JS
 @inject ToastService Toasts
 
+@{ _rows = VisibleTasks(); }
 <PageTitle>@(List?.Name ?? "Tasks") · Tasks</PageTitle>
 
 <div class="main-head">
@@ -42,7 +43,7 @@
     </div>
     <div class="toolbar">
         <input type="checkbox" class="select-check" data-testid="select-all" aria-label="Select all visible tasks"
-               checked="@AllVisibleSelected" @onchange="ToggleSelectAll" />
+               checked="@AllSelected(_rows)" @onchange="ToggleSelectAll" />
         <div class="filter-bar" role="group" aria-label="Filter tasks">
             @foreach (var (view, label) in Views)
             {
@@ -74,7 +75,7 @@
 {
     <p class="empty-state" role="alert">@_actionError</p>
 }
-@if (SelectedIds() is { Count: > 0 } selected)
+@if (SelectedIn(_rows) is { Count: > 0 } selected)
 {
     var targets = MoveTargets.ToList();
     <div class="bulk-bar" data-testid="bulk-bar" role="region" aria-label="Bulk actions">
@@ -104,14 +105,14 @@
     {
         <p class="empty-state">Loading…</p>
     }
-    else if (VisibleTasks() is { Count: 0 })
+    else if (_rows.Count == 0)
     {
         <p class="empty-state">Nothing here</p>
     }
     else
     {
-        @foreach (var task in VisibleTasks())
-        {
+        @* Only the rows in view (plus a few) are in the DOM; rows are 40 px (shared stylesheet). *@
+        <Virtualize Items="_rows" ItemSize="40" OverscanCount="10" Context="task">
             <div class="@RowClass(task)" role="listitem"
                  data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)"
                  @ondragover:preventDefault="true" @ondrop="() => DropOn(task)" @ondrop:preventDefault="true">
@@ -178,7 +179,7 @@
                     <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
                 </button>
             </div>
-        }
+        </Virtualize>
     }
 </div>
 
@@ -283,6 +284,8 @@
     [Parameter] public int? TaskId { get; set; }
 
     private List<TaskItem>? _tasks;
+    // The visible rows, computed once per render (the markup reads them several times).
+    private List<TaskItem> _rows = [];
     private string? _error;
     private int _loadedListId;
     private int _loadVersion;
@@ -376,7 +379,22 @@
     // A missing or unknown view is All.
     private string View => Views.Any(v => v.View == ViewParam) ? ViewParam! : "all";
 
-    private static string TodayIso => DateTime.Today.ToString("yyyy-MM-dd");
+    // Formatted once per day: the filters compare it against every task on each render.
+    private static DateTime _todayDate;
+    private static string _todayIso = "";
+    private static string TodayIso
+    {
+        get
+        {
+            var today = DateTime.Today;
+            if (today != _todayDate)
+            {
+                _todayIso = today.ToString("yyyy-MM-dd");
+                _todayDate = today;
+            }
+            return _todayIso;
+        }
+    }
 
     // All and Overdue are open tasks only; Today and Upcoming go by the due date alone.
     private static bool Matches(TaskItem task, string view) => view switch
@@ -834,11 +852,14 @@
     private int? _moveTargetId;
 
     /// <summary>The selected tasks still on screen: a bulk action never touches a hidden row.</summary>
-    private List<int> SelectedIds() =>
-        _selected.Count == 0 ? [] : VisibleTasks().Where(t => _selected.Contains(t.Id)).Select(t => t.Id).ToList();
+    private List<int> SelectedIds() => SelectedIn(VisibleTasks());
 
-    private bool AllVisibleSelected =>
-        VisibleTasks() is { Count: > 0 } rows && rows.All(t => _selected.Contains(t.Id));
+    private List<int> SelectedIn(List<TaskItem> rows) =>
+        _selected.Count == 0 ? [] : rows.Where(t => _selected.Contains(t.Id)).Select(t => t.Id).ToList();
+
+    private bool AllVisibleSelected => AllSelected(VisibleTasks());
+
+    private bool AllSelected(List<TaskItem> rows) => rows.Count > 0 && rows.All(t => _selected.Contains(t.Id));
 
     private void ToggleSelected(int id)
     {
