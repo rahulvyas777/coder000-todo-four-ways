@@ -106,7 +106,7 @@
                         </select>
                     </div>
                 </div>
-                var visible = Sorted(tasks.Where(t => InView(t, CurrentView) && Matches(t, searchText))).ToList();
+                var visible = VisibleTasks();
                 var allSelected = visible.Count > 0 && visible.All(t => selected.Contains(t.Id));
                 <div class="select-all-row">
                     <label>
@@ -215,6 +215,25 @@
             <button type="button" data-testid="toast-undo" @onclick="() => UndoToast(current)">Undo</button>
         </div>
     }
+
+    @if (showHelp)
+    {
+        <div class="shortcut-help" data-testid="shortcut-help" role="dialog" aria-labelledby="shortcut-help-title">
+            <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+            <dl>
+                <dt><kbd>n</kbd></dt><dd>New task</dd>
+                <dt><kbd>/</kbd></dt><dd>Search</dd>
+                <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Highlight the next / previous task</dd>
+                <dt><kbd>x</kbd></dt><dd>Complete or reopen the highlighted task</dd>
+                <dt><kbd>Del</kbd></dt><dd>Delete the highlighted task</dd>
+                <dt><kbd>Enter</kbd></dt><dd>Open the highlighted task</dd>
+                <dt><kbd>Esc</kbd></dt><dd>Close the panel or clear the selection</dd>
+                <dt><kbd>?</kbd></dt><dd>Show or hide this help</dd>
+            </dl>
+            @* panel.js clicks this on Escape. *@
+            <button type="button" data-help-close @onclick="() => showHelp = false">Close</button>
+        </div>
+    }
 </div>
 
 @code {
@@ -247,6 +266,7 @@
             loadedListId = ListId;
             pushedQueries.Clear();
             selected.Clear();
+            highlightedId = null;
         }
 
         SyncSearchFromUrl();
@@ -266,6 +286,7 @@
         {
             selfRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("taskReorder.register", selfRef);
+            await JS.InvokeVoidAsync("taskShortcuts.register", selfRef);
         }
         if (focusAdd && adding)
         {
@@ -575,6 +596,7 @@
         if (selected.Contains(t.Id)) c.Add("selected");
         if (!t.Completed && t.DueDate < DateOnly.FromDateTime(DateTime.Today)) c.Add("overdue");
         if (t.Id == TaskId) c.Add("open");
+        if (t.Id == highlightedId) c.Add("highlighted");
         return c.Count == 0 ? null : string.Join(' ', c);
     }
 
@@ -605,11 +627,61 @@
         await Api.ReorderTasksAsync(ListId.Value, order.Select(t => t.Id).ToList());
     }
 
+    private List<TaskItem> VisibleTasks() =>
+        Sorted(tasks.Where(t => InView(t, CurrentView) && Matches(t, searchText))).ToList();
+
+    // Keyboard shortcuts: shortcuts.js sends the keys that change state (n and / only move focus
+    // and stay in the browser). The highlight is a cursor over the visible rows.
+    private int? highlightedId;
+    private bool showHelp;
+
+    [JSInvokable]
+    public async Task Shortcut(string key)
+    {
+        if (key == "?")
+        {
+            showHelp = !showHelp;
+            StateHasChanged();
+            return;
+        }
+        if (!RendererInfo.IsInteractive || notFound) return;
+
+        var visible = VisibleTasks();
+        var index = visible.FindIndex(t => t.Id == highlightedId);
+        var current = index >= 0 ? visible[index] : null;
+        switch (key)
+        {
+            case "j":
+                if (visible.Count > 0) highlightedId = visible[Math.Min(index + 1, visible.Count - 1)].Id;
+                break;
+            case "k":
+                if (visible.Count > 0) highlightedId = visible[index < 0 ? visible.Count - 1 : Math.Max(index - 1, 0)].Id;
+                break;
+            case "x" when current is not null:
+                await ToggleTask(current);
+                break;
+            case "Delete" when current is not null:
+                // The highlight moves to the row that takes the deleted one's place.
+                var next = visible.ElementAtOrDefault(index + 1) ?? visible.ElementAtOrDefault(index - 1);
+                await DeleteTask(current);
+                highlightedId = next?.Id;
+                break;
+            case "Enter" when current is not null:
+                OpenTask(current);
+                break;
+        }
+        StateHasChanged();
+    }
+
     public async ValueTask DisposeAsync()
     {
         toastTimer?.Cancel();
         if (selfRef is null) return;
-        try { await JS.InvokeVoidAsync("taskReorder.unregister", selfRef); }
+        try
+        {
+            await JS.InvokeVoidAsync("taskReorder.unregister", selfRef);
+            await JS.InvokeVoidAsync("taskShortcuts.unregister", selfRef);
+        }
         catch (JSDisconnectedException) { }
         selfRef.Dispose();
     }
