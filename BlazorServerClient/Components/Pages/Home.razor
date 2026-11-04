@@ -74,7 +74,31 @@
             <div class="main-head">
                 <h2>@CurrentList?.Name</h2>
                 <span class="task-count" data-testid="task-count">@OpenCount of @tasks.Count open</span>
+                @if (RendererInfo.IsInteractive && CurrentList is { } ioList)
+                {
+                    @* Real downloads through this server's /export proxy (the `download` attribute keeps the
+                       Blazor router from intercepting the click). *@
+                    <div class="list-io" role="group" aria-label="Import and export">
+                        <a class="btn" data-testid="export-json" href="export/lists/@ioList.Id?format=json"
+                           download="@($"{ioList.Name}.json")" aria-label="Export @ioList.Name as JSON">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg>JSON
+                        </a>
+                        <a class="btn" data-testid="export-csv" href="export/lists/@ioList.Id?format=csv"
+                           download="@($"{ioList.Name}.csv")" aria-label="Export @ioList.Name as CSV">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg>CSV
+                        </a>
+                        <label class="btn import-btn">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-import" /></svg>Import
+                            <InputFile class="visually-hidden" data-testid="import-input" accept=".json,application/json"
+                                       aria-label="Import a list from a JSON file" OnChange="ImportFile" @key="importKey" />
+                        </label>
+                    </div>
+                }
             </div>
+            @if (importError is not null)
+            {
+                <p class="list-io-error" role="alert">@importError</p>
+            }
             @* Prerendered HTML is inert until the circuit connects, so clicks there are lost; the rows
                container appears only once the page is interactive. *@
             @if (!RendererInfo.IsInteractive)
@@ -271,6 +295,7 @@
             pushedQueries.Clear();
             selected.Clear();
             highlightedId = null;
+            importError = null;
         }
 
         SyncSearchFromUrl();
@@ -344,6 +369,40 @@
         var updated = await Api.RenameListAsync(l.Id, name);
         // The lists may have been reloaded (navigation) since this handler captured `l`.
         if (lists.FirstOrDefault(x => x.Id == updated.Id) is { } current) current.Name = updated.Name;
+    }
+
+    // Import: the chosen JSON file is posted to the API as is, then the new list is selected.
+    private const long MaxImportBytes = 10 * 1024 * 1024;
+    private string? importError;
+    private int importKey; // a fresh input after each import, so the same file can be chosen again
+
+    private async Task ImportFile(InputFileChangeEventArgs e)
+    {
+        importError = null;
+        importKey++;
+        string json;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(MaxImportBytes));
+            json = await reader.ReadToEndAsync();
+        }
+        catch (IOException)
+        {
+            importError = "The file is too large to import.";
+            return;
+        }
+        TaskList created;
+        try
+        {
+            created = await Api.ImportListAsync(json);
+        }
+        catch (HttpRequestException)
+        {
+            importError = $"Could not import {e.File.Name}: it is not a valid exported list.";
+            return;
+        }
+        lists = await Api.GetListsAsync();
+        Nav.NavigateTo($"lists/{created.Id}");
     }
 
     // Tasks: add, toggle, inline title edit, delete. Each change keeps the server's response.

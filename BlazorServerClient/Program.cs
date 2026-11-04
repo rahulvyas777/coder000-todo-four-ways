@@ -22,6 +22,19 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+
+// Export downloads go through this server (the browser never calls the API): the API's file and
+// Content-Disposition are passed through unchanged.
+app.MapGet("/export/lists/{id:int}", async (int id, string? format, TasksApi api, HttpContext ctx) =>
+{
+    using var res = await api.ExportListAsync(id, format == "csv" ? "csv" : "json");
+    ctx.Response.StatusCode = (int)res.StatusCode;
+    if (!res.IsSuccessStatusCode) return;
+    ctx.Response.ContentType = res.Content.Headers.ContentType?.ToString();
+    if (res.Content.Headers.ContentDisposition is { } disposition)
+        ctx.Response.Headers.ContentDisposition = disposition.ToString();
+    await res.Content.CopyToAsync(ctx.Response.Body);
+});
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

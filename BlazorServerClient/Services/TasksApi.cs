@@ -168,6 +168,19 @@ public sealed class TasksApi(HttpClient http)
         using var res = await http.DeleteAsync($"api/subtasks/{id}");
         res.EnsureSuccessStatusCode();
     }
+
+    /// <summary>The API's export download (json or csv); the caller disposes the response.</summary>
+    public Task<HttpResponseMessage> ExportListAsync(int id, string format) =>
+        http.GetAsync($"api/lists/{id}/export?format={Uri.EscapeDataString(format)}", HttpCompletionOption.ResponseHeadersRead);
+
+    /// <summary>Posts an exported list (the JSON document as is) and returns the created list.</summary>
+    public async Task<TaskList> ImportListAsync(string json)
+    {
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        using var res = await http.PostAsync("api/lists/import", content);
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskList>())!;
+    }
 }
 
 public sealed class CompleteResult
