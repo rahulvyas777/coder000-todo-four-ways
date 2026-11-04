@@ -1,0 +1,18 @@
+{
+  "name": "tasks-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "End-to-end suite for the Tasks app: one suite, every client. Tags @step00 to @step14.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p .",
+    "check-testids": "node check-testids.mjs ../SPEC.md"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "dotenv": "18.0.9",
+    "typescript": "7.0.2"
+  }
+}
