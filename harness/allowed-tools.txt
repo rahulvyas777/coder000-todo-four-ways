@@ -1,6 +1,9 @@
 # Allowed tools for every metered session, one per line (joined with commas into one
 # --allowedTools value by run-step.ps1). Seeded from SERIES-SPEC.md "Session protocol" step 3;
-# the dry run on step 0 of the reference client settles the final list.
+# the dry run on step 0 of a disposable React clone (Nov 4) settled the list: it added rm, mv,
+# cmp, diff, touch, sed, sort, tr, cut, awk, sleep, which, netstat, tasklist and three read-only
+# git commands after the session was denied cp+rm and cp+cmp chains. taskkill and kill stay
+# denied (the API and the test runner's dev server belong to the harness).
 Read
 Edit
 Write
@@ -27,3 +30,20 @@ Bash(wc:*)
 Bash(mkdir:*)
 Bash(cp:*)
 Bash(tsc:*)
+Bash(rm:*)
+Bash(mv:*)
+Bash(cmp:*)
+Bash(diff:*)
+Bash(touch:*)
+Bash(sed:*)
+Bash(sort:*)
+Bash(tr:*)
+Bash(cut:*)
+Bash(awk:*)
+Bash(sleep:*)
+Bash(which:*)
+Bash(netstat:*)
+Bash(tasklist:*)
+Bash(git log:*)
+Bash(git show:*)
+Bash(git ls-files:*)
