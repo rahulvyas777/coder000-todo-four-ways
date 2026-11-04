@@ -21,6 +21,23 @@
         </button>
       }
     </div>
+    <div class="search">
+      <input
+        type="search"
+        data-testid="search-input"
+        aria-label="Search tasks"
+        placeholder="Search"
+        [value]="query()"
+        (input)="setQuery($any($event.target).value)"
+      />
+    </div>
+    <div class="sort">
+      <select data-testid="sort-select" aria-label="Sort by" (change)="setSort($any($event.target).value)">
+        @for (s of sorts; track s.id) {
+          <option [value]="s.id" [selected]="sort() === s.id">{{ s.label }}</option>
+        }
+      </select>
+    </div>
   </div>
   <div class="task-add">
     <input

@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, numberAttribute, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
 import { httpResource } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
@@ -36,6 +36,49 @@ function matches(view: View, task: TaskItem, today: string): boolean {
     case 'completed':
       return task.completed;
   }
+}
+
+type Sort = 'manual' | 'due' | 'priority' | 'title' | 'created';
+
+const SORTS: readonly { id: Sort; label: string }[] = [
+  { id: 'manual', label: 'Manual' },
+  { id: 'due', label: 'Due date' },
+  { id: 'priority', label: 'Priority' },
+  { id: 'title', label: 'Title' },
+  { id: 'created', label: 'Created' },
+];
+
+function toSort(value: string | null): Sort {
+  return SORTS.some((s) => s.id === value) ? (value as Sort) : 'manual';
+}
+
+/** Ties keep the manual order (the list's positions). */
+function compare(sort: Sort, a: TaskItem, b: TaskItem): number {
+  switch (sort) {
+    case 'manual':
+      return 0;
+    case 'due':
+      // Nulls last; ISO dates compare as strings.
+      if (a.dueDate === b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate < b.dueDate ? -1 : 1;
+    case 'priority':
+      return b.priority - a.priority;
+    case 'title':
+      return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+    case 'created':
+      // Oldest first; ids follow creation order when timestamps tie.
+      return a.createdAt.localeCompare(b.createdAt) || a.id - b.id;
+  }
+}
+
+function matchesQuery(task: TaskItem, q: string): boolean {
+  return (
+    task.title.toLowerCase().includes(q) ||
+    task.notes.toLowerCase().includes(q) ||
+    task.tags.some((tag) => tag.includes(q))
+  );
 }
 
 /**
@@ -104,16 +147,57 @@ export class ListView {
     return counts;
   });
 
-  /** The rows of the selected filter, in list order. */
+  protected readonly sorts = SORTS;
+
+  /** The sort of `?sort=`; anything unknown is Manual. */
+  protected readonly sort = toSignal(
+    this.route.queryParamMap.pipe(map((q) => toSort(q.get('sort')))),
+    { initialValue: toSort(this.route.snapshot.queryParamMap.get('sort')) },
+  );
+
+  private readonly urlQuery = toSignal(
+    this.route.queryParamMap.pipe(map((q) => q.get('q') ?? '')),
+    { initialValue: this.route.snapshot.queryParamMap.get('q') ?? '' },
+  );
+
+  /**
+   * The search text. It follows `?q=` but is set at once on every keystroke, so the rows
+   * re-render without waiting for the navigation. No debounce on purpose: the comparison
+   * measures how fast each framework renders the filtered rows.
+   */
+  protected readonly query = linkedSignal(() => this.urlQuery());
+
+  /** The rows of the selected filter matching the search, in the selected order. */
   protected readonly visibleTasks = computed(() => {
     const view = this.view();
     const today = this.today();
-    return this.tasks().filter((t) => matches(view, t, today));
+    const q = this.query().trim().toLowerCase();
+    const sort = this.sort();
+    const rows = this.tasks().filter((t) => matches(view, t, today) && (!q || matchesQuery(t, q)));
+    // Array.prototype.sort is stable, so ties stay in manual order.
+    return sort === 'manual' ? rows : rows.sort((a, b) => compare(sort, a, b));
   });
 
   protected setView(view: View): void {
     void this.router.navigate([], {
       queryParams: { view: view === 'all' ? null : view },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  protected setQuery(q: string): void {
+    this.query.set(q);
+    void this.router.navigate([], {
+      queryParams: { q: q || null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  protected setSort(value: string): void {
+    const sort = toSort(value);
+    void this.router.navigate([], {
+      queryParams: { sort: sort === 'manual' ? null : sort },
       queryParamsHandling: 'merge',
     });
   }
