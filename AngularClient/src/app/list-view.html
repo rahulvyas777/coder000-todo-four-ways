@@ -7,6 +7,21 @@
       }
     </span>
   </header>
+  <div class="toolbar">
+    <div class="filter-bar" role="group" aria-label="Filter tasks">
+      @for (v of views; track v.id) {
+        <button
+          type="button"
+          class="filter"
+          [attr.data-testid]="'filter-' + v.id"
+          [attr.aria-pressed]="view() === v.id"
+          (click)="setView(v.id)"
+        >
+          {{ v.label }} <span class="count">{{ format(viewCounts()[v.id]) }}</span>
+        </button>
+      }
+    </div>
+  </div>
   <div class="task-add">
     <input
       #addInput
@@ -18,8 +33,12 @@
       (keydown.enter)="addTask(addInput)"
     />
   </div>
+  @if (tasksResource.hasValue() && visibleTasks().length === 0) {
+    <!-- Outside the rows' role="list", which may only hold list items. -->
+    <p class="empty-state">Nothing here</p>
+  }
   <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
-    @for (task of tasks(); track task.id) {
+    @for (task of visibleTasks(); track task.id) {
       <div
         class="task-row"
         role="listitem"

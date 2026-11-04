@@ -8,6 +8,36 @@ import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
 import { TaskChanges, TaskPanel } from './task-panel';
 
+type View = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed';
+
+const VIEWS: readonly { id: View; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'today', label: 'Today' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'completed', label: 'Completed' },
+];
+
+function toView(value: string | null): View {
+  return VIEWS.some((v) => v.id === value) ? (value as View) : 'all';
+}
+
+/** All = open tasks; Today and Upcoming include completed tasks; Overdue = open only. */
+function matches(view: View, task: TaskItem, today: string): boolean {
+  switch (view) {
+    case 'all':
+      return !task.completed;
+    case 'today':
+      return task.dueDate === today;
+    case 'upcoming':
+      return !!task.dueDate && task.dueDate > today;
+    case 'overdue':
+      return !task.completed && !!task.dueDate && task.dueDate < today;
+    case 'completed':
+      return task.completed;
+  }
+}
+
 /**
  * The main column for `/lists/{listId}` (header, task count, the add input and the task rows)
  * and, for `/lists/{listId}/tasks/{taskId}`, the detail panel next to it.
@@ -55,6 +85,38 @@ export class ListView {
   );
 
   protected readonly openCount = computed(() => this.tasks().filter((t) => !t.completed).length);
+
+  protected readonly views = VIEWS;
+
+  /** The filter of `?view=`; anything unknown is All. */
+  protected readonly view = toSignal(
+    this.route.queryParamMap.pipe(map((q) => toView(q.get('view')))),
+    { initialValue: toView(this.route.snapshot.queryParamMap.get('view')) },
+  );
+
+  /** How many tasks each filter shows. */
+  protected readonly viewCounts = computed(() => {
+    const today = this.today();
+    const counts: Record<View, number> = { all: 0, today: 0, upcoming: 0, overdue: 0, completed: 0 };
+    for (const t of this.tasks()) {
+      for (const v of VIEWS) if (matches(v.id, t, today)) counts[v.id]++;
+    }
+    return counts;
+  });
+
+  /** The rows of the selected filter, in list order. */
+  protected readonly visibleTasks = computed(() => {
+    const view = this.view();
+    const today = this.today();
+    return this.tasks().filter((t) => matches(view, t, today));
+  });
+
+  protected setView(view: View): void {
+    void this.router.navigate([], {
+      queryParams: { view: view === 'all' ? null : view },
+      queryParamsHandling: 'merge',
+    });
+  }
 
   /** The id of the task whose title is being edited inline. */
   protected readonly editingId = signal<number | null>(null);
