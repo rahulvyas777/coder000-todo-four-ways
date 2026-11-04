@@ -34,6 +34,22 @@
                 </button>
             }
         </div>
+        <div class="search">
+            @* oninput: the rows are filtered on every keystroke with no debounce on purpose,
+               because the comparison measures how fast each client re-renders. *@
+            <input type="search" placeholder="Search" aria-label="Search tasks" data-testid="search-input"
+                   @bind="_search" @bind:event="oninput" @bind:after="OnSearchChanged" />
+        </div>
+        <label class="sort">
+            <span class="visually-hidden">Sort by</span>
+            <select data-testid="sort-select" aria-label="Sort by" value="@Sort"
+                    @onchange="e => SetSort(e.Value as string)">
+                @foreach (var (sort, label) in Sorts)
+                {
+                    <option value="@sort">@label</option>
+                }
+            </select>
+        </label>
     </div>
 }
 @if (_actionError is not null)
@@ -50,13 +66,13 @@
     {
         <p class="empty-state">Loading…</p>
     }
-    else if (!_tasks.Any(t => Matches(t, View)))
+    else if (VisibleTasks() is { Count: 0 })
     {
         <p class="empty-state">Nothing here</p>
     }
     else
     {
-        @foreach (var task in _tasks.Where(t => Matches(t, View)))
+        @foreach (var task in VisibleTasks())
         {
             <div class="@RowClass(task)" role="listitem"
                  data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)">
@@ -183,6 +199,7 @@
     protected override async Task OnParametersSetAsync()
     {
         SyncPanel();
+        SyncSearch();
         if (ListId == _loadedListId) return;
         _loadedListId = ListId;
         _tasks = null;
@@ -238,6 +255,62 @@
 
     private void SetView(string view) =>
         Nav.NavigateTo(Nav.GetUriWithQueryParameter("view", view == "all" ? null : view));
+
+    // ---- Search (?q=) and sort (?sort=) ----
+
+    [SupplyParameterFromQuery(Name = "q")] public string? SearchParam { get; set; }
+    [SupplyParameterFromQuery(Name = "sort")] public string? SortParam { get; set; }
+
+    // The input owns the text while typing; it is reloaded from the URL only when the URL
+    // changes from elsewhere (a link, back/forward), so a keystroke is never overwritten.
+    private string _search = "";
+    private string? _pushedSearch;
+
+    private static readonly (string Sort, string Label)[] Sorts =
+        [("manual", "Manual"), ("due", "Due date"), ("priority", "Priority"), ("title", "Title"), ("created", "Created")];
+
+    // A missing or unknown sort is manual.
+    private string Sort => Sorts.Any(s => s.Sort == SortParam) ? SortParam! : "manual";
+
+    private void SyncSearch()
+    {
+        if (SearchParam == _pushedSearch) return;
+        _pushedSearch = SearchParam;
+        _search = SearchParam ?? "";
+    }
+
+    private void OnSearchChanged()
+    {
+        _pushedSearch = _search.Length == 0 ? null : _search;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", _pushedSearch), replace: true);
+    }
+
+    private void SetSort(string? sort) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("sort", sort is null or "manual" ? null : sort));
+
+    private static bool MatchesSearch(TaskItem task, string text) =>
+        text.Length == 0
+        || task.Title.Contains(text, StringComparison.OrdinalIgnoreCase)
+        || task.Notes.Contains(text, StringComparison.OrdinalIgnoreCase)
+        || task.Tags.Any(tag => tag.Contains(text, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The rows on screen: the filter, then the search, then the sort.</summary>
+    private List<TaskItem> VisibleTasks()
+    {
+        if (_tasks is null) return [];
+        var text = _search.Trim();
+        var rows = _tasks.Where(t => Matches(t, View) && MatchesSearch(t, text));
+        // OrderBy is stable, so ties keep the manual order.
+        rows = Sort switch
+        {
+            "due" => rows.OrderBy(t => t.DueDate is null).ThenBy(t => t.DueDate, StringComparer.Ordinal),
+            "priority" => rows.OrderByDescending(t => t.Priority),
+            "title" => rows.OrderBy(t => t.Title, StringComparer.CurrentCultureIgnoreCase),
+            "created" => rows.OrderBy(t => t.CreatedAt).ThenBy(t => t.Id),
+            _ => rows,
+        };
+        return rows.ToList();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
