@@ -36,6 +36,11 @@ public sealed class CompleteResult
     public TaskItem? Next { get; set; }
 }
 
+public sealed class BulkResult
+{
+    public int Affected { get; set; }
+}
+
 public sealed class Subtask
 {
     public int Id { get; set; }

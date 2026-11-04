@@ -25,6 +25,8 @@
                @onkeydown="OnAddKey" />
     </div>
     <div class="toolbar">
+        <input type="checkbox" class="select-check" data-testid="select-all" aria-label="Select all visible tasks"
+               checked="@AllVisibleSelected" @onchange="ToggleSelectAll" />
         <div class="filter-bar" role="group" aria-label="Filter tasks">
             @foreach (var (view, label) in Views)
             {
@@ -56,6 +58,26 @@
 {
     <p class="empty-state" role="alert">@_actionError</p>
 }
+@if (SelectedIds() is { Count: > 0 } selected)
+{
+    var targets = MoveTargets.ToList();
+    <div class="bulk-bar" data-testid="bulk-bar" role="region" aria-label="Bulk actions">
+        <span class="bulk-count" data-testid="bulk-count">@selected.Count selected</span>
+        <button type="button" data-testid="bulk-complete" @onclick="BulkComplete">Complete</button>
+        <button type="button" class="btn-danger" data-testid="bulk-delete" @onclick="BulkDelete">Delete</button>
+        @if (targets.Count > 0)
+        {
+            <select data-testid="bulk-move-target" aria-label="Move to list" value="@MoveTargetId"
+                    @onchange="e => _moveTargetId = int.TryParse(e.Value as string, out var id) ? id : null">
+                @foreach (var l in targets)
+                {
+                    <option value="@l.Id">@l.Name</option>
+                }
+            </select>
+            <button type="button" data-testid="bulk-move" @onclick="BulkMove">Move</button>
+        }
+    </div>
+}
 
 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
     @if (_error is not null)
@@ -86,6 +108,9 @@
                         <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
                     </button>
                 }
+                <input type="checkbox" class="select-check" data-testid="select-check-@task.Id"
+                       checked="@_selected.Contains(task.Id)" aria-label="@($"Select {task.Title}")"
+                       @onchange="() => ToggleSelected(task.Id)" @onclick:stopPropagation="true" />
                 <input type="checkbox" class="task-check" data-testid="task-check-@task.Id"
                        checked="@task.Completed" aria-label="@($"Completed: {task.Title}")"
                        @onchange="() => ToggleTask(task)" @onclick:stopPropagation="true" />
@@ -239,6 +264,7 @@
         _loadedListId = ListId;
         _tasks = null;
         _error = null;
+        _selected.Clear();
         // A slower response for a list the user already left must not overwrite the new one.
         var version = ++_loadVersion;
         try
@@ -470,6 +496,7 @@
         if (IsOverdue(task)) css += " overdue";
         if (task.Id == TaskId) css += " open";
         if (task.Id == _draggingId) css += " dragging";
+        if (_selected.Contains(task.Id)) css += " selected";
         return css;
     }
 
@@ -528,10 +555,16 @@
 
     private void ClosePanel() => Nav.NavigateTo($"lists/{ListId}{Query}");
 
+    /// <summary>Escape closes the panel first; with the panel closed it clears the selection.</summary>
     [JSInvokable]
     public void OnEscape()
     {
         if (TaskId is not null) ClosePanel();
+        else if (_selected.Count > 0)
+        {
+            _selected.Clear();
+            StateHasChanged();
+        }
     }
 
     private async Task Save(TaskItem task, object patch) =>
@@ -628,6 +661,61 @@
     {
         task.Subtasks.Remove(sub);
         await Run(() => Api.DeleteSubtaskAsync(sub.Id));
+    }
+
+    // ---- Bulk actions (POST /api/tasks/bulk; the selection clears afterwards) ----
+
+    private readonly HashSet<int> _selected = [];
+    private int? _moveTargetId;
+
+    /// <summary>The selected tasks still on screen: a bulk action never touches a hidden row.</summary>
+    private List<int> SelectedIds() =>
+        _selected.Count == 0 ? [] : VisibleTasks().Where(t => _selected.Contains(t.Id)).Select(t => t.Id).ToList();
+
+    private bool AllVisibleSelected =>
+        VisibleTasks() is { Count: > 0 } rows && rows.All(t => _selected.Contains(t.Id));
+
+    private void ToggleSelected(int id)
+    {
+        if (!_selected.Remove(id)) _selected.Add(id);
+    }
+
+    private void ToggleSelectAll()
+    {
+        if (AllVisibleSelected) _selected.Clear();
+        else _selected.UnionWith(VisibleTasks().Select(t => t.Id));
+    }
+
+    private IEnumerable<TaskList> MoveTargets => State.Lists.Where(l => l.Id != ListId);
+
+    // The select shows the first other list until the user picks one.
+    private int? MoveTargetId =>
+        MoveTargets.Any(l => l.Id == _moveTargetId) ? _moveTargetId : MoveTargets.FirstOrDefault()?.Id;
+
+    private Task BulkComplete() => RunBulk("complete", null, t => t.Completed = true);
+
+    private Task BulkDelete() => RunBulk("delete", null, t => _tasks?.Remove(t));
+
+    private Task BulkMove() =>
+        MoveTargetId is int target ? RunBulk("move", target, t => _tasks?.Remove(t)) : Task.CompletedTask;
+
+    /// <summary>
+    /// Applies the change locally, sends it, then re-reads the list: completing a repeating task
+    /// creates its next occurrence on the server.
+    /// </summary>
+    private async Task RunBulk(string action, int? targetListId, Action<TaskItem> applyLocally)
+    {
+        var ids = SelectedIds();
+        _selected.Clear();
+        if (ids.Count == 0 || _tasks is null) return;
+        foreach (var task in _tasks.Where(t => ids.Contains(t.Id)).ToList()) applyLocally(task);
+        var listId = ListId;
+        await Run(async () =>
+        {
+            await Api.BulkAsync(ids, action, targetListId);
+            var tasks = await Api.GetTasksAsync(listId);
+            if (listId == ListId) _tasks = tasks;
+        });
     }
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);

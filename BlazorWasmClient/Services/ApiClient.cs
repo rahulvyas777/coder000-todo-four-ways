@@ -80,6 +80,14 @@ public sealed class ApiClient(HttpClient http)
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Applies <paramref name="action"/> (complete, reopen, delete, restore, move) to every task in <paramref name="ids"/>.</summary>
+    public async Task<int> BulkAsync(IReadOnlyList<int> ids, string action, int? targetListId = null)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks/bulk", new { ids, action, targetListId });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<BulkResult>())!.Affected;
+    }
+
     public async Task<Subtask> CreateSubtaskAsync(int taskId, string title)
     {
         var response = await http.PostAsJsonAsync($"api/tasks/{taskId}/subtasks", new { title });
