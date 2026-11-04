@@ -63,6 +63,7 @@ export const api = {
   updateList: (id: number, changes: { name?: string; position?: number }) =>
     send<TaskList>('PATCH', `/api/lists/${id}`, changes),
   deleteList: (id: number) => send<void>('DELETE', `/api/lists/${id}`),
+  restoreList: (id: number) => send<TaskList>('POST', `/api/lists/${id}/restore`),
   tasks: (listId: number, signal?: AbortSignal) => request<TaskItem[]>(`/api/lists/${listId}/tasks`, { signal }),
   createTask: (listId: number, title: string) => send<TaskItem>('POST', '/api/tasks', { listId, title }),
   updateTask: (id: number, changes: TaskChanges) =>
@@ -70,6 +71,7 @@ export const api = {
   completeTask: (id: number) => send<{ task: TaskItem; next: TaskItem | null }>('POST', `/api/tasks/${id}/complete`),
   reopenTask: (id: number) => send<TaskItem>('POST', `/api/tasks/${id}/reopen`),
   deleteTask: (id: number) => send<void>('DELETE', `/api/tasks/${id}`),
+  restoreTask: (id: number) => send<TaskItem>('POST', `/api/tasks/${id}/restore`),
   reorderTasks: (listId: number, orderedIds: number[]) =>
     send<void>('POST', '/api/tasks/reorder', { listId, orderedIds }),
   addSubtask: (taskId: number, title: string) => send<Subtask>('POST', `/api/tasks/${taskId}/subtasks`, { title }),

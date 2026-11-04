@@ -17,18 +17,57 @@ export default function App() {
     return () => ctrl.abort()
   }, [])
 
+  // One undo toast at a time: a new action replaces it (and restarts its five seconds).
+  const [toast, setToast] = useState<Toast | null>(null)
+  const toastSeq = useRef(0)
+  const toastId = toast?.id
+
+  useEffect(() => {
+    if (toastId === undefined) return
+    const timer = setTimeout(() => setToast((t) => (t?.id === toastId ? null : t)), TOAST_MS)
+    return () => clearTimeout(timer)
+  }, [toastId])
+
+  const showToast: ShowToast = (message, undo) => setToast({ id: ++toastSeq.current, message, undo })
+
+  // Bumped after an undo so the list view refetches its tasks from the server.
+  const [reloadKey, setReloadKey] = useState(0)
+
+  async function runUndo(t: Toast) {
+    setToast(null)
+    await t.undo()
+    setLists(await api.lists())
+    setReloadKey((k) => k + 1)
+  }
+
   return (
     <div className="app">
-      <Sidebar lists={lists ?? []} setLists={setLists} />
+      <Sidebar lists={lists ?? []} setLists={setLists} showToast={showToast} />
       <Routes>
         <Route path="/" element={<Home lists={lists} error={error} />} />
         {/* One route for the list and its panel, so opening the panel never remounts the list. */}
-        <Route path="/lists/:listId/*" element={<ListView lists={lists ?? []} setLists={setLists} />} />
+        <Route
+          path="/lists/:listId/*"
+          element={<ListView lists={lists ?? []} setLists={setLists} showToast={showToast} reloadKey={reloadKey} />}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      {toast && (
+        <div className="toast" data-testid="toast" role="status">
+          <span>{toast.message}</span>
+          <button type="button" data-testid="toast-undo" onClick={() => void runUndo(toast)}>
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   )
 }
+
+const TOAST_MS = 5000
+
+type Toast = { id: number; message: string; undo: () => Promise<unknown> }
+type ShowToast = (message: string, undo: () => Promise<unknown>) => void
 
 function Icon({ name }: { name: string }) {
   return (
@@ -40,7 +79,7 @@ function Icon({ name }: { name: string }) {
 
 type SetLists = Dispatch<SetStateAction<TaskList[] | null>>
 
-function Sidebar({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }) {
+function Sidebar({ lists, setLists, showToast }: { lists: TaskList[]; setLists: SetLists; showToast: ShowToast }) {
   // The sidebar sits outside <Routes>, so useParams() would be empty here.
   const match = useMatch('/lists/:listId/*')
   const activeId = Number(match?.params.listId)
@@ -65,7 +104,12 @@ function Sidebar({ lists, setLists }: { lists: TaskList[]; setLists: SetLists })
     if (!window.confirm(`Delete the list "${list.name}" and its tasks?`)) return
     await api.deleteList(list.id)
     setLists((prev) => prev?.filter((l) => l.id !== list.id) ?? null)
-    if (list.id === activeId) navigate('/', { replace: true })
+    const wasActive = list.id === activeId
+    if (wasActive) navigate('/', { replace: true })
+    showToast(`Deleted list "${list.name}"`, async () => {
+      await api.restoreList(list.id)
+      if (wasActive) navigate(`/lists/${list.id}`)
+    })
   }
 
   return (
@@ -206,7 +250,17 @@ function Home({ lists, error }: { lists: TaskList[] | null; error: string | null
   )
 }
 
-function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }) {
+function ListView({
+  lists,
+  setLists,
+  showToast,
+  reloadKey,
+}: {
+  lists: TaskList[]
+  setLists: SetLists
+  showToast: ShowToast
+  reloadKey: number
+}) {
   const listId = Number(useParams().listId)
   const list = lists.find((l) => l.id === listId)
   const taskMatch = useMatch('/lists/:listId/tasks/:taskId')
@@ -300,6 +354,7 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     await api.deleteTask(task.id)
     setTasks((ts) => ts.filter((t) => t.id !== task.id))
     adjustCounts(-1, task.completed ? 0 : -1)
+    showToast(`Deleted "${task.title}"`, () => api.restoreTask(task.id))
   }
 
   // Drag-and-drop reorder, hand-rolled on the native HTML5 drag events (no library).
@@ -340,7 +395,7 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
         if (!ctrl.signal.aborted) setLoaded({ listId, tasks: [] })
       })
     return () => ctrl.abort()
-  }, [listId])
+  }, [listId, reloadKey])
 
   // Rows of a previous list are never shown while the next one loads.
   const tasks = loaded?.listId === listId ? loaded.tasks : null
@@ -420,10 +475,15 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     if (ids.length === 0 || (action === 'move' && target === undefined)) return
     setSelected(NO_IDS)
     const picked = new Set(ids)
+    // Undo reopens only the tasks this action completed, not those that already were.
+    const reopenIds = tasks.filter((t) => picked.has(t.id) && !t.completed).map((t) => t.id)
     if (action === 'complete') setTasks((ts) => ts.map((t) => (picked.has(t.id) ? { ...t, completed: true } : t)))
     else setTasks((ts) => ts.filter((t) => !picked.has(t.id)))
     try {
       await api.bulk(ids, action, action === 'move' ? target : undefined)
+      const n = `${ids.length} task${ids.length === 1 ? '' : 's'}`
+      if (action === 'delete') showToast(`Deleted ${n}`, () => api.bulk(ids, 'restore'))
+      else if (action === 'complete') showToast(`Completed ${n}`, () => api.bulk(reopenIds, 'reopen'))
     } finally {
       // The server's state wins: completing a repeating task creates its next occurrence, and the
       // sidebar counts of this list (and of the move target) change.
