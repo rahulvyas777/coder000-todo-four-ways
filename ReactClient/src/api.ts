@@ -76,4 +76,8 @@ export const api = {
   updateSubtask: (id: number, changes: { title?: string; done?: boolean; position?: number }) =>
     send<Subtask>('PATCH', `/api/subtasks/${id}`, changes),
   deleteSubtask: (id: number) => send<void>('DELETE', `/api/subtasks/${id}`),
+  bulk: (ids: number[], action: BulkAction, targetListId?: number) =>
+    send<{ affected: number }>('POST', '/api/tasks/bulk', { ids, action, targetListId }),
 }
+
+export type BulkAction = 'complete' | 'reopen' | 'delete' | 'restore' | 'move'

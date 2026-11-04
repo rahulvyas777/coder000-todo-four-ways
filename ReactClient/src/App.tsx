@@ -380,6 +380,59 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     navigate({ search: qs ? `?${qs}` : '' }, { replace })
   }
 
+  // Bulk selection, tagged with its list so switching lists starts with nothing selected.
+  const [selection, setSelection] = useState<{ listId: number; ids: ReadonlySet<number> }>({ listId, ids: new Set() })
+  const selected = selection.listId === listId ? selection.ids : NO_IDS
+  const [moveTarget, setMoveTarget] = useState<number | null>(null)
+  const otherLists = lists.filter((l) => l.id !== listId)
+  const target = otherLists.find((l) => l.id === moveTarget)?.id ?? otherLists[0]?.id
+  const allSelected = !!visible && visible.length > 0 && visible.every((t) => selected.has(t.id))
+
+  function setSelected(ids: ReadonlySet<number>) {
+    setSelection({ listId, ids })
+  }
+
+  function toggleSelected(id: number) {
+    const next = new Set(selected)
+    if (!next.delete(id)) next.add(id)
+    setSelected(next)
+  }
+
+  function toggleSelectAll() {
+    setSelected(allSelected ? NO_IDS : new Set(visible?.map((t) => t.id)))
+  }
+
+  // Escape clears the selection unless an inline editor already handled it.
+  const hasSelection = selected.size > 0
+  useEffect(() => {
+    if (!hasSelection) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !e.defaultPrevented) setSelection({ listId, ids: NO_IDS })
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [hasSelection, listId])
+
+  /** Runs a bulk action on the selected tasks of this list, then clears the selection. */
+  async function runBulk(action: 'complete' | 'delete' | 'move') {
+    if (!tasks) return
+    const ids = tasks.filter((t) => selected.has(t.id)).map((t) => t.id)
+    if (ids.length === 0 || (action === 'move' && target === undefined)) return
+    setSelected(NO_IDS)
+    const picked = new Set(ids)
+    if (action === 'complete') setTasks((ts) => ts.map((t) => (picked.has(t.id) ? { ...t, completed: true } : t)))
+    else setTasks((ts) => ts.filter((t) => !picked.has(t.id)))
+    try {
+      await api.bulk(ids, action, action === 'move' ? target : undefined)
+    } finally {
+      // The server's state wins: completing a repeating task creates its next occurrence, and the
+      // sidebar counts of this list (and of the move target) change.
+      const [fresh, freshLists] = await Promise.all([api.tasks(listId), api.lists()])
+      setLoaded((prev) => (prev?.listId === listId ? { listId, tasks: fresh } : prev))
+      setLists(freshLists)
+    }
+  }
+
   function selectView(next: View) {
     setParam('view', next === 'all' ? null : next)
   }
@@ -421,6 +474,16 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
         />
       </form>
       <div className="toolbar">
+        <input
+          type="checkbox"
+          className="select-check"
+          data-testid="select-all"
+          aria-label="Select all visible tasks"
+          title="Select all"
+          checked={allSelected}
+          disabled={!visible || visible.length === 0}
+          onChange={toggleSelectAll}
+        />
         <div className="filter-bar" role="group" aria-label="Filter tasks">
           {VIEW_ORDER.map((v) => (
             <button
@@ -460,12 +523,50 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
           </select>
         </div>
       </div>
+      {selected.size > 0 && (
+        <div className="bulk-bar" data-testid="bulk-bar" role="region" aria-label="Bulk actions">
+          <span className="bulk-count" data-testid="bulk-count" aria-live="polite">
+            {selected.size} selected
+          </span>
+          <button type="button" data-testid="bulk-complete" onClick={() => void runBulk('complete')}>
+            <Icon name="i-check" />
+            Complete
+          </button>
+          <button type="button" className="btn-danger" data-testid="bulk-delete" onClick={() => void runBulk('delete')}>
+            <Icon name="i-trash" />
+            Delete
+          </button>
+          <select
+            aria-label="Move to list"
+            data-testid="bulk-move-target"
+            value={target ?? ''}
+            disabled={otherLists.length === 0}
+            onChange={(e) => setMoveTarget(Number(e.currentTarget.value))}
+          >
+            {otherLists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-testid="bulk-move"
+            disabled={target === undefined}
+            onClick={() => void runBulk('move')}
+          >
+            Move
+          </button>
+        </div>
+      )}
       <div className="rows-container" data-testid="rows-container">
         {visible?.map((t) => (
           <TaskRow
             key={t.id}
             task={t}
             isOpen={t.id === openId}
+            selected={selected.has(t.id)}
+            onSelect={() => toggleSelected(t.id)}
             drag={
               sort === 'manual'
                 ? {
@@ -504,6 +605,8 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   )
 }
 
+const NO_IDS: ReadonlySet<number> = new Set()
+
 type DropWhere = 'before' | 'after'
 type DropAt = { id: number; where: DropWhere }
 
@@ -526,6 +629,8 @@ function dropWhere(e: DragEvent<HTMLElement>): DropWhere {
 function TaskRow(props: {
   task: TaskItem
   isOpen: boolean
+  selected: boolean
+  onSelect: () => void
   drag: RowDrag | null
   onOpen: () => void
   onToggle: () => void
@@ -537,7 +642,7 @@ function TaskRow(props: {
 
   return (
     <div
-      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
+      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${props.selected ? ' selected' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
       data-testid={`task-row-${task.id}`}
       onClick={(e) => {
         // Clicks on the row's own controls (checkbox, delete, title editor) do not open the panel.
@@ -581,6 +686,14 @@ function TaskRow(props: {
           <Icon name="i-drag" />
         </span>
       )}
+      <input
+        type="checkbox"
+        className="select-check"
+        data-testid={`select-check-${task.id}`}
+        checked={props.selected}
+        onChange={props.onSelect}
+        aria-label={`Select: ${task.title}`}
+      />
       <input
         type="checkbox"
         className="task-check"
