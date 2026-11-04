@@ -30,4 +30,38 @@ public sealed class ApiClient(HttpClient http)
 
     public async Task<List<TaskItem>> GetTasksAsync(int listId) =>
         await http.GetFromJsonAsync<List<TaskItem>>($"api/lists/{listId}/tasks") ?? [];
+
+    public async Task<TaskItem> CreateTaskAsync(int listId, string title)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks", new { listId, title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    public async Task<TaskItem> RenameTaskAsync(int id, string title)
+    {
+        var response = await http.PatchAsJsonAsync($"api/tasks/{id}", new { title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    public async Task<CompleteResult> CompleteTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/complete", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CompleteResult>())!;
+    }
+
+    public async Task<TaskItem> ReopenTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/reopen", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    public async Task DeleteTaskAsync(int id)
+    {
+        var response = await http.DeleteAsync($"api/tasks/{id}");
+        response.EnsureSuccessStatusCode();
+    }
 }

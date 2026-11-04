@@ -30,6 +30,12 @@ public sealed class TaskItem
     public List<Subtask> Subtasks { get; set; } = [];
 }
 
+public sealed class CompleteResult
+{
+    public TaskItem Task { get; set; } = new();
+    public TaskItem? Next { get; set; }
+}
+
 public sealed class Subtask
 {
     public int Id { get; set; }

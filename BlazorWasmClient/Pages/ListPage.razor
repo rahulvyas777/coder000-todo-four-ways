@@ -14,6 +14,19 @@
     }
 </div>
 
+@if (_tasks is not null)
+{
+    <div class="task-add">
+        <input type="text" @bind="_newTitle" @bind:event="oninput" maxlength="200"
+               placeholder="Add a task" aria-label="New task title" data-testid="task-add-input"
+               @onkeydown="OnAddKey" />
+    </div>
+}
+@if (_actionError is not null)
+{
+    <p class="empty-state" role="alert">@_actionError</p>
+}
+
 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
     @if (_error is not null)
     {
@@ -33,10 +46,26 @@
         {
             <div class="task-row @(task.Completed ? "completed" : null)" role="listitem"
                  data-testid="task-row-@task.Id" @key="task.Id">
-                @* Read-only until step 02 makes it toggle. *@
                 <input type="checkbox" class="task-check" data-testid="task-check-@task.Id"
-                       checked="@task.Completed" disabled aria-label="@($"Completed: {task.Title}")" />
-                <span class="task-title" data-testid="task-title-@task.Id">@task.Title</span>
+                       checked="@task.Completed" aria-label="@($"Completed: {task.Title}")"
+                       @onchange="() => ToggleTask(task)" />
+                @if (_editingId == task.Id)
+                {
+                    <span class="task-title" data-testid="task-title-@task.Id">
+                        <input type="text" @ref="_editInput" @bind="_editText" @bind:event="oninput" maxlength="200"
+                               aria-label="@($"Edit title of {task.Title}")"
+                               @onkeydown="e => OnEditKey(e, task)" @onblur="() => CommitEdit(task)" />
+                    </span>
+                }
+                else
+                {
+                    <span class="task-title" data-testid="task-title-@task.Id"
+                          @ondblclick="() => StartEdit(task)">@task.Title</span>
+                }
+                <button type="button" class="btn-icon btn-danger task-delete" data-testid="task-delete-@task.Id"
+                        aria-label="@($"Delete {task.Title}")" @onclick="() => DeleteTask(task)">
+                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                </button>
             </div>
         }
     }
@@ -82,6 +111,109 @@
                     : $"Could not load the tasks: {ex.Message}";
             }
         }
+    }
+
+    private string _newTitle = "";
+    private int? _editingId;
+    private string _editText = "";
+    private ElementReference _editInput;
+    private bool _focusEdit;
+    private string? _actionError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusEdit && _editingId is not null)
+        {
+            _focusEdit = false;
+            await _editInput.FocusAsync();
+        }
+    }
+
+    private async Task OnAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || _tasks is null) return;
+        var title = _newTitle.Trim();
+        if (title.Length == 0) return;
+        _newTitle = "";
+        var listId = ListId;
+        await Run(async () =>
+        {
+            var created = await Api.CreateTaskAsync(listId, title);
+            if (listId == ListId) _tasks?.Add(created);
+        });
+    }
+
+    // Each change is applied optimistically, then replaced by the task the server returns.
+    private async Task ToggleTask(TaskItem task)
+    {
+        var completing = !task.Completed;
+        task.Completed = completing;
+        await Run(async () =>
+        {
+            if (completing)
+            {
+                var result = await Api.CompleteTaskAsync(task.Id);
+                Replace(result.Task);
+                if (result.Next is not null && result.Next.ListId == ListId) _tasks?.Add(result.Next);
+            }
+            else
+            {
+                Replace(await Api.ReopenTaskAsync(task.Id));
+            }
+        });
+    }
+
+    private void StartEdit(TaskItem task)
+    {
+        _editingId = task.Id;
+        _editText = task.Title;
+        _focusEdit = true;
+    }
+
+    private async Task OnEditKey(KeyboardEventArgs e, TaskItem task)
+    {
+        if (e.Key == "Escape") _editingId = null;
+        else if (e.Key == "Enter") await CommitEdit(task);
+    }
+
+    private async Task CommitEdit(TaskItem task)
+    {
+        // Enter commits, and the blur that follows when the input goes away must not commit twice.
+        if (_editingId != task.Id) return;
+        _editingId = null;
+        var title = _editText.Trim();
+        if (title.Length == 0 || title == task.Title) return;
+        task.Title = title;
+        await Run(async () => Replace(await Api.RenameTaskAsync(task.Id, title)));
+    }
+
+    private async Task DeleteTask(TaskItem task)
+    {
+        _tasks?.Remove(task);
+        await Run(() => Api.DeleteTaskAsync(task.Id));
+    }
+
+    private void Replace(TaskItem updated)
+    {
+        if (_tasks is null) return;
+        var i = _tasks.FindIndex(t => t.Id == updated.Id);
+        if (i >= 0) _tasks[i] = updated;
+    }
+
+    /// <summary>Runs a change, then refreshes the sidebar counts; on failure re-reads the server state.</summary>
+    private async Task Run(Func<Task> action)
+    {
+        try
+        {
+            _actionError = null;
+            await action();
+        }
+        catch (HttpRequestException ex)
+        {
+            _actionError = $"The change was not saved: {ex.Message}";
+            try { _tasks = await Api.GetTasksAsync(ListId); } catch (HttpRequestException) { }
+        }
+        await State.ReloadListsAsync();
     }
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
