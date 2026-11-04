@@ -65,4 +65,24 @@ export class Api {
   tasks(listId: number): Observable<TaskItem[]> {
     return this.http.get<TaskItem[]>(`${API_URL}/api/lists/${listId}/tasks`);
   }
+
+  createTask(listId: number, title: string): Observable<TaskItem> {
+    return this.http.post<TaskItem>(`${API_URL}/api/tasks`, { listId, title });
+  }
+
+  updateTask(id: number, changes: Partial<Pick<TaskItem, 'title' | 'notes' | 'dueDate' | 'priority' | 'tags' | 'repeat' | 'listId'>>): Observable<TaskItem> {
+    return this.http.patch<TaskItem>(`${API_URL}/api/tasks/${id}`, changes);
+  }
+
+  completeTask(id: number): Observable<{ task: TaskItem; next: TaskItem | null }> {
+    return this.http.post<{ task: TaskItem; next: TaskItem | null }>(`${API_URL}/api/tasks/${id}/complete`, {});
+  }
+
+  reopenTask(id: number): Observable<TaskItem> {
+    return this.http.post<TaskItem>(`${API_URL}/api/tasks/${id}/reopen`, {});
+  }
+
+  deleteTask(id: number): Observable<void> {
+    return this.http.delete<void>(`${API_URL}/api/tasks/${id}`);
+  }
 }

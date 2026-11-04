@@ -6,6 +6,17 @@
     }
   </span>
 </header>
+<div class="task-add">
+  <input
+    #addInput
+    type="text"
+    data-testid="task-add-input"
+    aria-label="Add a task"
+    placeholder="Add a task"
+    maxlength="200"
+    (keydown.enter)="addTask(addInput)"
+  />
+</div>
 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
   @for (task of tasks(); track task.id) {
     <div
@@ -14,16 +25,43 @@
       [class.completed]="task.completed"
       [attr.data-testid]="'task-row-' + task.id"
     >
-      <!-- Read-only in step 00: the checkbox shows the state, toggling arrives in step 02. -->
       <input
+        #check
         type="checkbox"
         class="task-check"
         [attr.data-testid]="'task-check-' + task.id"
         [checked]="task.completed"
         [attr.aria-label]="'Completed: ' + task.title"
-        (click)="$event.preventDefault()"
+        (change)="toggle(task, check)"
       />
-      <span class="task-title" [attr.data-testid]="'task-title-' + task.id">{{ task.title }}</span>
+      @if (editingId() === task.id) {
+        <span class="task-title">
+          <input
+            type="text"
+            appAutofocus
+            maxlength="200"
+            [attr.aria-label]="'Edit title of ' + task.title"
+            [value]="task.title"
+            (keydown.enter)="commitEdit(task, $any($event.target).value)"
+            (keydown.escape)="cancelEdit()"
+            (blur)="commitEdit(task, $any($event.target).value)"
+          />
+        </span>
+      } @else {
+        <span class="task-title" [attr.data-testid]="'task-title-' + task.id" (dblclick)="startEdit(task.id)">{{
+          task.title
+        }}</span>
+      }
+      <button
+        type="button"
+        class="btn-icon btn-danger task-delete"
+        [attr.data-testid]="'task-delete-' + task.id"
+        [attr.aria-label]="'Delete task ' + task.title"
+        title="Delete"
+        (click)="deleteTask(task)"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+      </button>
     </div>
   }
 </div>
