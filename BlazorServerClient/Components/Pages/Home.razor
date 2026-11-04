@@ -82,8 +82,24 @@
                     <input type="text" data-testid="task-add-input" aria-label="New task" maxlength="200"
                            placeholder="Add a task" @bind="newTaskTitle" @bind:event="oninput" @onkeydown="OnTaskAddKey" />
                 </div>
+                <div class="toolbar">
+                    <div class="filter-bar" role="group" aria-label="Filter tasks">
+                        @foreach (var (view, label) in Views)
+                        {
+                            <button type="button" class="filter" data-testid="filter-@view"
+                                    aria-pressed="@(CurrentView == view ? "true" : "false")" @onclick="() => SetView(view)">
+                                @label <span class="count">@tasks.Count(t => InView(t, view))</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+                var visible = tasks.Where(t => InView(t, CurrentView)).ToList();
                 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
-                    @foreach (var t in tasks)
+                    @if (visible.Count == 0)
+                    {
+                        <p class="empty-state">Nothing here</p>
+                    }
+                    @foreach (var t in visible)
                     {
                         <div class="task-row @RowClass(t)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id"
                              @onclick="() => OpenTask(t)">
@@ -299,6 +315,30 @@
     }
 
     private void ClosePanel() => Nav.NavigateTo($"lists/{ListId}{Query}");
+
+    // Filters: ?view= selects one; All (the default) shows open tasks only.
+    [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
+
+    private static readonly (string View, string Label)[] Views =
+        [("all", "All"), ("today", "Today"), ("upcoming", "Upcoming"), ("overdue", "Overdue"), ("completed", "Completed")];
+
+    private string CurrentView => Views.Any(v => v.View == View) ? View! : "all";
+
+    private static bool InView(TaskItem t, string view)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return view switch
+        {
+            "today" => t.DueDate == today,
+            "upcoming" => t.DueDate > today,
+            "overdue" => !t.Completed && t.DueDate < today,
+            "completed" => t.Completed,
+            _ => !t.Completed,
+        };
+    }
+
+    private void SetView(string view) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("view", view == "all" ? null : view));
 
     private string? RowClass(TaskItem t)
     {
