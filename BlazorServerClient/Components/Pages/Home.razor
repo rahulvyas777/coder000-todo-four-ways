@@ -78,13 +78,30 @@
             }
             else
             {
+                <div class="task-add">
+                    <input type="text" data-testid="task-add-input" aria-label="New task" maxlength="200"
+                           placeholder="Add a task" @bind="newTaskTitle" @bind:event="oninput" @onkeydown="OnTaskAddKey" />
+                </div>
                 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
                     @foreach (var t in tasks)
                     {
                         <div class="task-row @(t.Completed ? "completed" : null)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id">
                             <input type="checkbox" class="task-check" data-testid="task-check-@t.Id"
-                                   checked="@t.Completed" disabled aria-label="Completed: @t.Title" />
-                            <span class="task-title" data-testid="task-title-@t.Id">@t.Title</span>
+                                   checked="@t.Completed" @onchange="() => ToggleTask(t)" aria-label="Completed: @t.Title" />
+                            @* Same inline editor as the list rename (inline-edit.js opens it on the double-click). *@
+                            <span class="task-title" data-testid="task-title-@t.Id" data-inline-edit-host
+                                  data-inline-edit="dblclick" data-editing="@(editingTaskId == t.Id)"
+                                  @ondblclick="() => StartEditTask(t)">
+                                <input type="text" aria-label="Task title" maxlength="200" data-inline-edit-input
+                                       @bind:get="editingTaskId == t.Id ? editTitle : t.Title"
+                                       @bind:set="v => editTitle = v ?? string.Empty" @bind:event="oninput"
+                                       @onkeydown="e => OnEditTaskKey(e, t)" @onblur="() => CommitEditTask(t)" />
+                                <span data-inline-edit-view>@t.Title</span>
+                            </span>
+                            <button type="button" class="btn-icon btn-danger task-delete" data-testid="task-delete-@t.Id"
+                                    aria-label="Delete task @t.Title" @onclick="() => DeleteTask(t)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                            </button>
                         </div>
                     }
                 </div>
@@ -186,6 +203,66 @@
         var updated = await Api.RenameListAsync(l.Id, name);
         // The lists may have been reloaded (navigation) since this handler captured `l`.
         if (lists.FirstOrDefault(x => x.Id == updated.Id) is { } current) current.Name = updated.Name;
+    }
+
+    // Tasks: add, toggle, inline title edit, delete. Each change keeps the server's response.
+    private string newTaskTitle = "";
+    private int? editingTaskId;
+    private string editTitle = "";
+
+    private void ReplaceTask(TaskItem updated)
+    {
+        var i = tasks.FindIndex(x => x.Id == updated.Id);
+        if (i >= 0) tasks[i] = updated;
+    }
+
+    private async Task OnTaskAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || ListId is null) return;
+        var title = newTaskTitle.Trim();
+        newTaskTitle = "";
+        if (title.Length == 0) return;
+        var listId = ListId.Value;
+        var created = await Api.CreateTaskAsync(listId, title);
+        if (loadedListId == listId) tasks.Add(created);
+        lists = await Api.GetListsAsync();
+    }
+
+    private async Task ToggleTask(TaskItem t)
+    {
+        var updated = t.Completed
+            ? await Api.ReopenTaskAsync(t.Id)
+            : (await Api.CompleteTaskAsync(t.Id)).Task;
+        ReplaceTask(updated);
+        lists = await Api.GetListsAsync();
+    }
+
+    private void StartEditTask(TaskItem t)
+    {
+        editingTaskId = t.Id;
+        editTitle = t.Title;
+    }
+
+    private async Task OnEditTaskKey(KeyboardEventArgs e, TaskItem t)
+    {
+        if (e.Key == "Enter") await CommitEditTask(t);
+        else if (e.Key == "Escape") editingTaskId = null;
+    }
+
+    private async Task CommitEditTask(TaskItem t)
+    {
+        if (editingTaskId != t.Id) return;
+        editingTaskId = null;
+        var title = editTitle.Trim();
+        if (title.Length == 0 || title == t.Title) return;
+        ReplaceTask(await Api.RenameTaskAsync(t.Id, title));
+    }
+
+    private async Task DeleteTask(TaskItem t)
+    {
+        await Api.DeleteTaskAsync(t.Id);
+        tasks.RemoveAll(x => x.Id == t.Id);
+        lists = await Api.GetListsAsync();
     }
 
     private async Task DeleteList(TaskList l)
