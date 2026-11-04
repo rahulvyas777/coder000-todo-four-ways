@@ -1,0 +1,141 @@
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h1 class="app-title" data-testid="app-title">Tasks</h1>
+      <div class="sidebar-tools">
+        <button
+          type="button"
+          class="btn-icon"
+          data-testid="theme-toggle"
+          [attr.aria-label]="themes.theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+          [attr.title]="themes.theme() === 'dark' ? 'Light theme' : 'Dark theme'"
+          (click)="themes.toggle()"
+        >
+          <svg class="icon" aria-hidden="true">
+            <use [attr.href]="themes.theme() === 'dark' ? 'icons.svg#i-sun' : 'icons.svg#i-moon'" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
+          data-testid="list-add"
+          aria-label="Add list"
+          title="Add list"
+          [attr.aria-expanded]="adding()"
+          (click)="startAdd()"
+        >
+          <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
+        </button>
+      </div>
+    </div>
+    <nav aria-label="Lists">
+      <ul class="list-nav" data-testid="list-nav">
+        @for (list of store.lists(); track list.id) {
+          <li
+            class="list-item"
+            [attr.data-testid]="'list-item-' + list.id"
+            [class.active]="activeListId() === list.id"
+          >
+            @if (editingId() === list.id) {
+              <input
+                type="text"
+                appAutofocus
+                maxlength="80"
+                [attr.aria-label]="'Rename list ' + list.name"
+                [value]="list.name"
+                (keydown.enter)="commitRename(list.id, $any($event.target).value)"
+                (keydown.escape)="cancelRename()"
+                (blur)="commitRename(list.id, $any($event.target).value)"
+              />
+            } @else {
+              <a
+                [routerLink]="['/lists', list.id]"
+                [attr.aria-current]="activeListId() === list.id ? 'page' : null"
+                (dblclick)="startRename(list.id)"
+              >
+                <span>{{ list.name }}</span>
+                <span class="list-count" [attr.data-testid]="'list-count-' + list.id">{{ list.openCount }}</span>
+              </a>
+              <span class="list-actions">
+                <button
+                  type="button"
+                  class="btn-icon"
+                  [attr.data-testid]="'list-rename-' + list.id"
+                  [attr.aria-label]="'Rename list ' + list.name"
+                  title="Rename"
+                  (click)="startRename(list.id)"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="icons.svg#i-edit" /></svg>
+                </button>
+                <button
+                  type="button"
+                  class="btn-icon btn-danger"
+                  [attr.data-testid]="'list-delete-' + list.id"
+                  [attr.aria-label]="'Delete list ' + list.name"
+                  title="Delete"
+                  (click)="deleteList(list.id, list.name)"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                </button>
+              </span>
+            }
+          </li>
+        }
+      </ul>
+    </nav>
+    @if (adding()) {
+      <div class="list-add-row">
+        <input
+          type="text"
+          appAutofocus
+          data-testid="list-name-input"
+          aria-label="New list name"
+          placeholder="New list"
+          maxlength="80"
+          (keydown.enter)="commitAdd($any($event.target))"
+          (keydown.escape)="adding.set(false)"
+        />
+      </div>
+    }
+    <div class="sidebar-tools">
+      <button
+        type="button"
+        class="btn-icon"
+        data-testid="export-json"
+        title="Export the list as JSON"
+        [disabled]="activeListId() === null"
+        (click)="exportList('json')"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg> JSON
+      </button>
+      <button
+        type="button"
+        class="btn-icon"
+        data-testid="export-csv"
+        title="Export the list as CSV"
+        [disabled]="activeListId() === null"
+        (click)="exportList('csv')"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg> CSV
+      </button>
+      <label class="btn-icon" title="Import a list from a JSON file">
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-import" /></svg> Import
+        <input
+          type="file"
+          class="visually-hidden"
+          accept=".json,application/json"
+          data-testid="import-input"
+          aria-label="Import list from JSON file"
+          (change)="importList($any($event.target))"
+        />
+      </label>
+    </div>
+  </aside>
+  <router-outlet />
+</div>
+<div class="toast" role="status" data-testid="toast" [hidden]="!undo.toast()">
+  @if (undo.toast(); as toast) {
+    <span>{{ toast.message }}</span>
+    <button type="button" data-testid="toast-undo" (click)="undo.undo()">Undo</button>
+  }
+</div>

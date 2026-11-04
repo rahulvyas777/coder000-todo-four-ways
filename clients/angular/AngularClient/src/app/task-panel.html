@@ -1,0 +1,112 @@
+@let t = task();
+<div class="panel-head">
+  <input
+    #titleInput
+    type="text"
+    data-testid="panel-title"
+    aria-label="Title"
+    maxlength="200"
+    [value]="t.title"
+    (keydown.enter)="titleInput.blur()"
+    (blur)="saveTitle(titleInput)"
+  />
+  <button type="button" class="btn-icon" data-testid="panel-close" aria-label="Close details" title="Close" (click)="close()">
+    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+  </button>
+</div>
+
+<label for="panel-notes">Notes</label>
+<textarea
+  #notes
+  id="panel-notes"
+  data-testid="panel-notes"
+  [value]="t.notes"
+  (blur)="saveNotes(notes.value)"
+></textarea>
+
+<label for="panel-due">Due date</label>
+<input
+  #due
+  id="panel-due"
+  type="date"
+  data-testid="panel-due"
+  [value]="t.dueDate ?? ''"
+  (change)="saveDue(due.value)"
+/>
+
+<label for="panel-priority">Priority</label>
+<select
+  #priority
+  id="panel-priority"
+  data-testid="panel-priority"
+  (change)="savePriority(priority.value)"
+>
+  @for (p of priorities; track p.value) {
+    <option [value]="p.value" [selected]="p.value === t.priority">{{ p.label }}</option>
+  }
+</select>
+
+<label for="panel-tags-input">Tags</label>
+<div class="tags-box">
+  @for (tag of t.tags; track tag) {
+    <span class="tag" [attr.data-testid]="'panel-tag-' + tag">
+      {{ tag }}
+      <button type="button" [attr.aria-label]="'Remove tag ' + tag" (click)="removeTag(tag)">
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+      </button>
+    </span>
+  }
+  <input
+    #tagInput
+    id="panel-tags-input"
+    type="text"
+    data-testid="panel-tags-input"
+    placeholder="Add a tag"
+    maxlength="40"
+    (keydown.enter)="addTag(tagInput)"
+    (keydown.backspace)="removeLastTag($event, tagInput)"
+  />
+</div>
+
+<label for="panel-repeat">Repeat</label>
+<select #repeat id="panel-repeat" data-testid="panel-repeat" (change)="saveRepeat(repeat.value)">
+  @for (r of repeats; track r.value) {
+    <option [value]="r.value" [selected]="r.value === t.repeat">{{ r.label }}</option>
+  }
+</select>
+
+<label for="subtask-add-input">Subtasks</label>
+<ul class="subtasks" aria-label="Subtasks">
+  @for (s of t.subtasks; track s.id) {
+    <li class="subtask-row" [class.done]="s.done" [attr.data-testid]="'subtask-row-' + s.id">
+      <input
+        type="checkbox"
+        [attr.data-testid]="'subtask-check-' + s.id"
+        [attr.aria-label]="'Done: ' + s.title"
+        [checked]="s.done"
+        (change)="toggleSubtask.emit(s)"
+      />
+      <span class="subtask-title">{{ s.title }}</span>
+      <button
+        type="button"
+        class="btn-icon btn-danger"
+        [attr.data-testid]="'subtask-delete-' + s.id"
+        [attr.aria-label]="'Delete subtask ' + s.title"
+        title="Delete"
+        (click)="deleteSubtask.emit(s)"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+      </button>
+    </li>
+  }
+</ul>
+<input
+  #subtaskInput
+  id="subtask-add-input"
+  type="text"
+  class="subtask-add"
+  data-testid="subtask-add-input"
+  placeholder="Add a subtask"
+  maxlength="200"
+  (keydown.enter)="submitSubtask(subtaskInput)"
+/>

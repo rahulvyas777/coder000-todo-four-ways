@@ -1,0 +1,249 @@
+<div class="main">
+  <header class="main-head">
+    <h2>{{ list()?.name ?? '' }}</h2>
+    <span class="task-count" data-testid="task-count" aria-live="polite">
+      @if (tasksResource.hasValue()) {
+        {{ format(openCount()) }} of {{ format(tasks().length) }} open
+      }
+    </span>
+  </header>
+  <div class="toolbar">
+    <div class="filter-bar" role="group" aria-label="Filter tasks">
+      @for (v of views; track v.id) {
+        <button
+          type="button"
+          class="filter"
+          [attr.data-testid]="'filter-' + v.id"
+          [attr.aria-pressed]="view() === v.id"
+          (click)="setView(v.id)"
+        >
+          {{ v.label }} <span class="count">{{ format(viewCounts()[v.id]) }}</span>
+        </button>
+      }
+    </div>
+    <div class="search">
+      <input
+        #searchInput
+        type="search"
+        data-testid="search-input"
+        aria-label="Search tasks"
+        placeholder="Search"
+        [value]="query()"
+        (input)="setQuery($any($event.target).value)"
+      />
+    </div>
+    <div class="sort">
+      <select data-testid="sort-select" aria-label="Sort by" (change)="setSort($any($event.target).value)">
+        @for (s of sorts; track s.id) {
+          <option [value]="s.id" [selected]="sort() === s.id">{{ s.label }}</option>
+        }
+      </select>
+    </div>
+  </div>
+  <div class="task-add">
+    <input
+      type="checkbox"
+      class="select-check"
+      data-testid="select-all"
+      aria-label="Select all visible tasks"
+      title="Select all"
+      [checked]="allVisibleSelected()"
+      [disabled]="visibleTasks().length === 0"
+      (change)="toggleSelectAll(); $any($event.target).checked = allVisibleSelected()"
+    />
+    <input
+      #addInput
+      type="text"
+      data-testid="task-add-input"
+      aria-label="Add a task"
+      placeholder="Add a task"
+      maxlength="200"
+      (keydown.enter)="addTask(addInput)"
+    />
+  </div>
+  @if (selectedCount() > 0) {
+    <div class="bulk-bar" data-testid="bulk-bar" role="toolbar" aria-label="Bulk actions">
+      <span class="bulk-count" data-testid="bulk-count" aria-live="polite">{{ selectedCount() }} selected</span>
+      <button type="button" data-testid="bulk-complete" (click)="bulk('complete')">Complete</button>
+      <button type="button" class="btn-danger" data-testid="bulk-delete" (click)="bulk('delete')">Delete</button>
+      <select
+        data-testid="bulk-move-target"
+        aria-label="Move to list"
+        (change)="moveTargetId.set(+$any($event.target).value)"
+      >
+        @for (l of moveTargets(); track l.id) {
+          <option [value]="l.id" [selected]="moveTargetId() === l.id">{{ l.name }}</option>
+        }
+      </select>
+      <button type="button" data-testid="bulk-move" [disabled]="moveTargetId() === null" (click)="bulk('move')">
+        Move
+      </button>
+    </div>
+  }
+  @if (tasksResource.hasValue() && visibleTasks().length === 0) {
+    <!-- Outside the rows' role="list", which may only hold list items. -->
+    <p class="empty-state">Nothing here</p>
+  }
+  <div
+    #rows
+    class="rows-container"
+    data-testid="rows-container"
+    role="list"
+    aria-label="Tasks"
+    (scroll)="onRowsScroll()"
+  >
+    <!-- Only the rows in and near the viewport are rendered; the spacer keeps the full height. -->
+    <div class="rows-spacer" role="none" [style.height.px]="visibleTasks().length * rowHeight">
+    @for (task of rowWindow().rows; track task.id; let i = $index) {
+      <div
+        class="task-row"
+        role="listitem"
+        [style.top.px]="(rowWindow().start + i) * rowHeight"
+        [attr.aria-posinset]="rowWindow().start + i + 1"
+        [attr.aria-setsize]="visibleTasks().length"
+        [class.completed]="task.completed"
+        [class.overdue]="isOverdue(task)"
+        [class.open]="openTaskId() === task.id"
+        [class.highlighted]="highlightedId() === task.id"
+        [class.selected]="selected().has(task.id)"
+        [attr.data-testid]="'task-row-' + task.id"
+        [class.dragging]="draggingId() === task.id"
+        [class.drop-before]="dropTarget()?.id === task.id && !dropTarget()?.after"
+        [class.drop-after]="dropTarget()?.id === task.id && dropTarget()?.after"
+        (click)="openRow(task, $event)"
+        (dragover)="onDragOver(task, $event)"
+        (drop)="onDrop($event)"
+      >
+        @if (sort() === 'manual') {
+          <button
+            type="button"
+            class="drag-handle"
+            draggable="true"
+            [attr.data-testid]="'drag-handle-' + task.id"
+            [attr.aria-label]="'Drag to reorder ' + task.title"
+            title="Drag to reorder"
+            (dragstart)="onDragStart(task, $event)"
+            (dragend)="onDragEnd()"
+          >
+            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
+          </button>
+        }
+        <input
+          type="checkbox"
+          class="select-check"
+          [attr.data-testid]="'select-check-' + task.id"
+          [checked]="selected().has(task.id)"
+          [attr.aria-label]="'Select ' + task.title"
+          (change)="toggleSelected(task, $any($event.target).checked)"
+        />
+        <input
+          #check
+          type="checkbox"
+          class="task-check"
+          [attr.data-testid]="'task-check-' + task.id"
+          [checked]="task.completed"
+          [attr.aria-label]="'Completed: ' + task.title"
+          (change)="toggle(task, check.checked)"
+        />
+        @if (editingId() === task.id) {
+          <span class="task-title">
+            <input
+              type="text"
+              appAutofocus
+              maxlength="200"
+              [attr.aria-label]="'Edit title of ' + task.title"
+              [value]="task.title"
+              (keydown.enter)="commitEdit(task, $any($event.target).value)"
+              (keydown.escape)="cancelEdit()"
+              (blur)="commitEdit(task, $any($event.target).value)"
+            />
+          </span>
+        } @else {
+          <span class="task-title" [attr.data-testid]="'task-title-' + task.id" (dblclick)="startEdit(task.id)">{{
+            task.title
+          }}</span>
+        }
+        <span class="task-meta">
+          @for (tag of task.tags; track tag) {
+            <span class="tag" [attr.data-testid]="'task-tag-' + task.id + '-' + tag">{{ tag }}</span>
+          }
+          @if (task.subtasks.length > 0) {
+            <span
+              class="subtask-progress"
+              [attr.data-testid]="'subtask-progress-' + task.id"
+              [attr.title]="doneCount(task) + ' of ' + task.subtasks.length + ' subtasks done'"
+              >{{ doneCount(task) }}/{{ task.subtasks.length }}</span
+            >
+          }
+          @if (task.dueDate) {
+            <time class="task-due" [attr.data-testid]="'task-due-' + task.id" [attr.datetime]="task.dueDate">{{
+              formatDue(task.dueDate)
+            }}</time>
+          }
+          @if (task.repeat !== 'none') {
+            <span
+              class="task-repeat"
+              role="img"
+              [attr.data-testid]="'task-repeat-' + task.id"
+              [attr.aria-label]="'Repeats ' + task.repeat"
+              [attr.title]="'Repeats ' + task.repeat"
+              ><svg class="icon" aria-hidden="true"><use href="icons.svg#i-repeat" /></svg
+            ></span>
+          }
+          @if (task.priority > 0) {
+            <span
+              role="img"
+              [class]="'prio prio-' + task.priority"
+              [attr.data-testid]="'task-priority-' + task.id"
+              [attr.aria-label]="priorityNames[task.priority] + ' priority'"
+              [attr.title]="priorityNames[task.priority] + ' priority'"
+            ></span>
+          }
+        </span>
+        <button
+          type="button"
+          class="btn-icon btn-danger task-delete"
+          [attr.data-testid]="'task-delete-' + task.id"
+          [attr.aria-label]="'Delete task ' + task.title"
+          title="Delete"
+          (click)="deleteTask(task)"
+        >
+          <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+        </button>
+      </div>
+    }
+    </div>
+  </div>
+</div>
+@if (openTask(); as t) {
+  <app-task-panel
+    [task]="t"
+    (save)="saveDetails(t, $event)"
+    (closed)="closePanel()"
+    (addSubtask)="addSubtask(t, $event)"
+    (toggleSubtask)="toggleSubtask(t, $event)"
+    (deleteSubtask)="deleteSubtask(t, $event)"
+  />
+}
+<dialog #help class="shortcut-help" data-testid="shortcut-help" aria-labelledby="shortcut-help-title">
+  <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+  <dl>
+    <dt><kbd>n</kbd></dt>
+    <dd>Add a task</dd>
+    <dt><kbd>/</kbd></dt>
+    <dd>Search</dd>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt>
+    <dd>Highlight the next or previous task</dd>
+    <dt><kbd>x</kbd></dt>
+    <dd>Complete or reopen the highlighted task</dd>
+    <dt><kbd>Del</kbd></dt>
+    <dd>Delete the highlighted task</dd>
+    <dt><kbd>Enter</kbd></dt>
+    <dd>Open the highlighted task</dd>
+    <dt><kbd>Esc</kbd></dt>
+    <dd>Close the panel or clear the selection</dd>
+    <dt><kbd>?</kbd></dt>
+    <dd>Show or hide this help</dd>
+  </dl>
+  <p><button type="button" (click)="toggleHelp()">Close</button></p>
+</dialog>
