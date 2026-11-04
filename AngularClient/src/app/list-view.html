@@ -1,0 +1,29 @@
+<header class="main-head">
+  <h2>{{ list()?.name ?? '' }}</h2>
+  <span class="task-count" data-testid="task-count" aria-live="polite">
+    @if (tasksResource.hasValue()) {
+      {{ format(openCount()) }} of {{ format(tasks().length) }} open
+    }
+  </span>
+</header>
+<div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
+  @for (task of tasks(); track task.id) {
+    <div
+      class="task-row"
+      role="listitem"
+      [class.completed]="task.completed"
+      [attr.data-testid]="'task-row-' + task.id"
+    >
+      <!-- Read-only in step 00: the checkbox shows the state, toggling arrives in step 02. -->
+      <input
+        type="checkbox"
+        class="task-check"
+        [attr.data-testid]="'task-check-' + task.id"
+        [checked]="task.completed"
+        [attr.aria-label]="'Completed: ' + task.title"
+        (click)="$event.preventDefault()"
+      />
+      <span class="task-title" [attr.data-testid]="'task-title-' + task.id">{{ task.title }}</span>
+    </div>
+  }
+</div>
