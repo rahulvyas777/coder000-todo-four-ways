@@ -88,3 +88,9 @@
   </aside>
   <router-outlet />
 </div>
+<div class="toast" role="status" data-testid="toast" [hidden]="!undo.toast()">
+  @if (undo.toast(); as toast) {
+    <span>{{ toast.message }}</span>
+    <button type="button" data-testid="toast-undo" (click)="undo.undo()">Undo</button>
+  }
+</div>

@@ -38,4 +38,10 @@ export class ListsStore {
     await firstValueFrom(this.api.deleteList(id));
     this.lists.update((ls) => ls.filter((l) => l.id !== id));
   }
+
+  /** Brings back a deleted list and its tasks; the reload puts it back in its position. */
+  async restore(id: number): Promise<void> {
+    await firstValueFrom(this.api.restoreList(id));
+    await this.reload();
+  }
 }

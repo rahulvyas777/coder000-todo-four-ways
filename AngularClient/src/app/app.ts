@@ -4,6 +4,7 @@ import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router
 import { filter, map } from 'rxjs';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
+import { UndoService } from './undo';
 
 @Component({
   imports: [RouterOutlet, RouterLink, Autofocus],
@@ -14,6 +15,7 @@ export class App {
   protected readonly store = inject(ListsStore);
   private readonly router = inject(Router);
   private readonly appRef = inject(ApplicationRef);
+  protected readonly undo = inject(UndoService);
 
   /** The list in the URL; it is highlighted in the sidebar and survives a reload. */
   protected readonly activeListId = toSignal(
@@ -78,7 +80,13 @@ export class App {
   protected async deleteList(id: number, name: string): Promise<void> {
     if (!confirm(`Delete the list "${name}" and its tasks?`)) return;
     await this.store.remove(id);
-    if (this.activeListId() === id) {
+    const wasActive = this.activeListId() === id;
+    const url = this.router.url;
+    this.undo.show(`Deleted list "${name}"`, async () => {
+      await this.store.restore(id);
+      if (wasActive) await this.router.navigateByUrl(url);
+    });
+    if (wasActive) {
       const first = this.store.lists()[0];
       await this.router.navigate(first ? ['/lists', first.id] : ['/']);
     }

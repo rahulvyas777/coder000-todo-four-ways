@@ -64,6 +64,10 @@ export class Api {
     return this.http.delete<void>(`${API_URL}/api/lists/${id}`);
   }
 
+  restoreList(id: number): Observable<TaskList> {
+    return this.http.post<TaskList>(`${API_URL}/api/lists/${id}/restore`, {});
+  }
+
   tasks(listId: number): Observable<TaskItem[]> {
     return this.http.get<TaskItem[]>(`${API_URL}/api/lists/${listId}/tasks`);
   }
@@ -86,6 +90,10 @@ export class Api {
 
   deleteTask(id: number): Observable<void> {
     return this.http.delete<void>(`${API_URL}/api/tasks/${id}`);
+  }
+
+  restoreTask(id: number): Observable<TaskItem> {
+    return this.http.post<TaskItem>(`${API_URL}/api/tasks/${id}/restore`, {});
   }
 
   reorderTasks(listId: number, orderedIds: number[]): Observable<void> {

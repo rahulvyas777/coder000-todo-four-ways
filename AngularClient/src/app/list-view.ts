@@ -7,6 +7,7 @@ import { API_URL, Api, Subtask, TaskItem } from './api';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
 import { TaskChanges, TaskPanel } from './task-panel';
+import { UndoService } from './undo';
 
 type View = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed';
 
@@ -98,6 +99,7 @@ export class ListView {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly undo = inject(UndoService);
 
   readonly listId = input.required({ transform: numberAttribute });
 
@@ -263,6 +265,10 @@ export class ListView {
     await firstValueFrom(this.api.deleteTask(task.id));
     this.tasksResource.update((ts) => (ts ?? []).filter((t) => t.id !== task.id));
     this.refreshCounts();
+    this.undo.show(`Deleted "${task.title}"`, async () => {
+      await firstValueFrom(this.api.restoreTask(task.id));
+      this.afterUndo(task.listId);
+    });
   }
 
   /** The task being dragged by its handle (manual sort only; native HTML5 drag and drop). */
@@ -389,6 +395,19 @@ export class ListView {
       // Completing a repeating task creates its next occurrence on the server.
       if (action === 'complete') this.tasksResource.reload();
     }
+    this.refreshCounts();
+    if (action === 'move') return;
+    const n = ids.length;
+    const noun = n === 1 ? 'task' : 'tasks';
+    this.undo.show(action === 'complete' ? `Completed ${n} ${noun}` : `Deleted ${n} ${noun}`, async () => {
+      await firstValueFrom(this.api.bulk(ids, action === 'complete' ? 'reopen' : 'restore'));
+      this.afterUndo(listId);
+    });
+  }
+
+  /** After an undo the server's state is the truth: reload the rows (if still shown) and counts. */
+  private afterUndo(listId: number): void {
+    if (this.listId() === listId) this.tasksResource.reload();
     this.refreshCounts();
   }
 
