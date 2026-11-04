@@ -3,6 +3,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ToastService Toasts
 
 <aside class="sidebar" aria-label="Lists">
     <div class="sidebar-head">
@@ -160,10 +161,16 @@
         await Run(async () =>
         {
             await State.DeleteListAsync(list.Id);
-            if (_activeListId == list.Id)
+            var wasActive = _activeListId == list.Id;
+            if (wasActive)
             {
                 Nav.NavigateTo(State.Lists.Count > 0 ? $"lists/{State.Lists[0].Id}" : "", replace: true);
             }
+            Toasts.Show($"Deleted the list \"{list.Name}\"", async () =>
+            {
+                await State.RestoreListAsync(list.Id);
+                if (wasActive) Nav.NavigateTo($"lists/{list.Id}");
+            });
         });
     }
 

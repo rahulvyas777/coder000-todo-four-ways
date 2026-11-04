@@ -6,6 +6,7 @@
 @inject AppState State
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ToastService Toasts
 
 <PageTitle>@(List?.Name ?? "Tasks") · Tasks</PageTitle>
 
@@ -253,6 +254,7 @@
     protected override void OnInitialized()
     {
         State.Changed += OnStateChanged;
+        State.TasksChanged += OnTasksChanged;
         _ = State.EnsureListsAsync();
     }
 
@@ -449,7 +451,41 @@
     private async Task DeleteTask(TaskItem task)
     {
         _tasks?.Remove(task);
-        await Run(() => Api.DeleteTaskAsync(task.Id));
+        var listId = ListId;
+        await Run(async () =>
+        {
+            await Api.DeleteTaskAsync(task.Id);
+            ShowUndo($"Deleted \"{task.Title}\"", listId, () => Api.RestoreTaskAsync(task.Id));
+        });
+    }
+
+    // ---- Undo (one toast; a new action replaces it) ----
+
+    /// <summary>Offers to undo a change; the undo re-reads the list and the sidebar counts.</summary>
+    private void ShowUndo(string message, int listId, Func<Task> undo) =>
+        Toasts.Show(message, async () =>
+        {
+            await undo();
+            State.NotifyTasksChanged(listId);
+            await State.ReloadListsAsync();
+        });
+
+    private async void OnTasksChanged(int listId)
+    {
+        if (listId != ListId) return;
+        await InvokeAsync(async () =>
+        {
+            try
+            {
+                var tasks = await Api.GetTasksAsync(listId);
+                if (listId == ListId) _tasks = tasks;
+            }
+            catch (HttpRequestException ex)
+            {
+                _actionError = $"Could not reload the tasks: {ex.Message}";
+            }
+            StateHasChanged();
+        });
     }
 
     private void Replace(TaskItem updated)
@@ -692,27 +728,39 @@
     private int? MoveTargetId =>
         MoveTargets.Any(l => l.Id == _moveTargetId) ? _moveTargetId : MoveTargets.FirstOrDefault()?.Id;
 
-    private Task BulkComplete() => RunBulk("complete", null, t => t.Completed = true);
+    // Undo reopens only the tasks this action completed, not the ones that already were.
+    private Task BulkComplete() => RunBulk("complete", null, t => t.Completed = true,
+        (ids, tasks) => tasks.Where(t => !t.Completed).Select(t => t.Id).ToList() is { Count: > 0 } opened
+            ? ($"Completed {Plural(opened.Count)}", () => Api.BulkAsync(opened, "reopen"))
+            : null);
 
-    private Task BulkDelete() => RunBulk("delete", null, t => _tasks?.Remove(t));
+    private Task BulkDelete() => RunBulk("delete", null, t => _tasks?.Remove(t),
+        (ids, _) => ($"Deleted {Plural(ids.Count)}", () => Api.BulkAsync(ids, "restore")));
 
     private Task BulkMove() =>
-        MoveTargetId is int target ? RunBulk("move", target, t => _tasks?.Remove(t)) : Task.CompletedTask;
+        MoveTargetId is int target ? RunBulk("move", target, t => _tasks?.Remove(t), null) : Task.CompletedTask;
+
+    private static string Plural(int n) => n == 1 ? "1 task" : $"{n} tasks";
 
     /// <summary>
     /// Applies the change locally, sends it, then re-reads the list: completing a repeating task
-    /// creates its next occurrence on the server.
+    /// creates its next occurrence on the server. <paramref name="undo"/> runs before the local
+    /// change, gets the ids and their tasks, and returns the toast text and the undo call (or null).
     /// </summary>
-    private async Task RunBulk(string action, int? targetListId, Action<TaskItem> applyLocally)
+    private async Task RunBulk(string action, int? targetListId, Action<TaskItem> applyLocally,
+        Func<List<int>, List<TaskItem>, (string Message, Func<Task> Undo)?>? undo)
     {
         var ids = SelectedIds();
         _selected.Clear();
         if (ids.Count == 0 || _tasks is null) return;
-        foreach (var task in _tasks.Where(t => ids.Contains(t.Id)).ToList()) applyLocally(task);
+        var affected = _tasks.Where(t => ids.Contains(t.Id)).ToList();
+        var toast = undo?.Invoke(ids, affected);
+        foreach (var task in affected) applyLocally(task);
         var listId = ListId;
         await Run(async () =>
         {
             await Api.BulkAsync(ids, action, targetListId);
+            if (toast is var (message, undoCall)) ShowUndo(message, listId, undoCall);
             var tasks = await Api.GetTasksAsync(listId);
             if (listId == ListId) _tasks = tasks;
         });
@@ -723,6 +771,7 @@
     public async ValueTask DisposeAsync()
     {
         State.Changed -= OnStateChanged;
+        State.TasksChanged -= OnTasksChanged;
         try
         {
             if (_keys is not null)

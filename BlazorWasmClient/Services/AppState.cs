@@ -50,4 +50,16 @@ public sealed class AppState(ApiClient api)
         await api.DeleteListAsync(id);
         await ReloadListsAsync();
     }
+
+    /// <summary>Restores a soft-deleted list (the API restores its tasks with it).</summary>
+    public async Task RestoreListAsync(int id)
+    {
+        await api.RestoreListAsync(id);
+        await ReloadListsAsync();
+    }
+
+    /// <summary>Raised after an undo changed tasks on the server, so a page showing them re-reads.</summary>
+    public event Action<int>? TasksChanged;
+
+    public void NotifyTasksChanged(int listId) => TasksChanged?.Invoke(listId);
 }

@@ -11,5 +11,6 @@ var apiUrl = builder.Configuration["ApiUrl"] ?? "http://localhost:16010/";
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiUrl) });
 builder.Services.AddScoped<ApiClient>();
 builder.Services.AddScoped<AppState>();
+builder.Services.AddScoped<ToastService>();
 
 await builder.Build().RunAsync();

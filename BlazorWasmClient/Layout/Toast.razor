@@ -1,0 +1,24 @@
+@implements IDisposable
+@inject ToastService Toasts
+
+@if (Toasts.Message is not null)
+{
+    <div class="toast" data-testid="toast" role="status">
+        <span>@Toasts.Message</span>
+        <button type="button" data-testid="toast-undo" @onclick="Toasts.UndoAsync">Undo</button>
+    </div>
+}
+else if (Toasts.Error is not null)
+{
+    <div class="toast" role="alert">
+        <span>@Toasts.Error</span>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized() => Toasts.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Toasts.Changed -= OnChanged;
+}

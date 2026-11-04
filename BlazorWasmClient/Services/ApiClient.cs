@@ -28,6 +28,12 @@ public sealed class ApiClient(HttpClient http)
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task RestoreListAsync(int id)
+    {
+        var response = await http.PostAsync($"api/lists/{id}/restore", null);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<List<TaskItem>> GetTasksAsync(int listId) =>
         await http.GetFromJsonAsync<List<TaskItem>>($"api/lists/{listId}/tasks") ?? [];
 
@@ -78,6 +84,13 @@ public sealed class ApiClient(HttpClient http)
     {
         var response = await http.DeleteAsync($"api/tasks/{id}");
         response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<TaskItem> RestoreTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/restore", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
     }
 
     /// <summary>Applies <paramref name="action"/> (complete, reopen, delete, restore, move) to every task in <paramref name="ids"/>.</summary>
