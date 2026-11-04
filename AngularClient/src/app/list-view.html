@@ -23,6 +23,7 @@
     </div>
     <div class="search">
       <input
+        #searchInput
         type="search"
         data-testid="search-input"
         aria-label="Search tasks"
@@ -91,6 +92,7 @@
         [class.completed]="task.completed"
         [class.overdue]="isOverdue(task)"
         [class.open]="openTaskId() === task.id"
+        [class.highlighted]="highlightedId() === task.id"
         [class.selected]="selected().has(task.id)"
         [attr.data-testid]="'task-row-' + task.id"
         [class.dragging]="draggingId() === task.id"
@@ -129,7 +131,7 @@
           [attr.data-testid]="'task-check-' + task.id"
           [checked]="task.completed"
           [attr.aria-label]="'Completed: ' + task.title"
-          (change)="toggle(task, check)"
+          (change)="toggle(task, check.checked)"
         />
         @if (editingId() === task.id) {
           <span class="task-title">
@@ -200,3 +202,25 @@
     (deleteSubtask)="deleteSubtask(t, $event)"
   />
 }
+<dialog #help class="shortcut-help" data-testid="shortcut-help" aria-labelledby="shortcut-help-title">
+  <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+  <dl>
+    <dt><kbd>n</kbd></dt>
+    <dd>Add a task</dd>
+    <dt><kbd>/</kbd></dt>
+    <dd>Search</dd>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt>
+    <dd>Highlight the next or previous task</dd>
+    <dt><kbd>x</kbd></dt>
+    <dd>Complete or reopen the highlighted task</dd>
+    <dt><kbd>Del</kbd></dt>
+    <dd>Delete the highlighted task</dd>
+    <dt><kbd>Enter</kbd></dt>
+    <dd>Open the highlighted task</dd>
+    <dt><kbd>Esc</kbd></dt>
+    <dd>Close the panel or clear the selection</dd>
+    <dt><kbd>?</kbd></dt>
+    <dd>Show or hide this help</dd>
+  </dl>
+  <p><button type="button" (click)="toggleHelp()">Close</button></p>
+</dialog>

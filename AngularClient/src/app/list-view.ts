@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
 import { httpResource } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
@@ -91,7 +91,7 @@ function matchesQuery(task: TaskItem, q: string): boolean {
   templateUrl: './list-view.html',
   imports: [Autofocus, TaskPanel],
   // The main column and the panel are cells of the shell's grid.
-  host: { style: 'display: contents', '(document:keydown.escape)': 'onEscape($event)' },
+  host: { style: 'display: contents', '(document:keydown)': 'onKeydown($event)' },
 })
 export class ListView {
   private readonly api = inject(Api);
@@ -118,6 +118,9 @@ export class ListView {
   });
 
   private readonly panel = viewChild(TaskPanel);
+  private readonly addInput = viewChild.required<ElementRef<HTMLInputElement>>('addInput');
+  private readonly searchInput = viewChild.required<ElementRef<HTMLInputElement>>('searchInput');
+  private readonly help = viewChild.required<ElementRef<HTMLDialogElement>>('help');
 
   protected readonly list = computed(() => this.store.lists().find((l) => l.id === this.listId()));
 
@@ -222,8 +225,7 @@ export class ListView {
     this.refreshCounts();
   }
 
-  protected async toggle(task: TaskItem, checkbox: HTMLInputElement): Promise<void> {
-    const completed = checkbox.checked;
+  protected async toggle(task: TaskItem, completed: boolean): Promise<void> {
     // Optimistic: show the new state at once, then replace it with the server's task.
     this.replace({ ...task, completed });
     // Render it inside the click, so the row never shows the old state after the server answers.
@@ -423,11 +425,106 @@ export class ListView {
     void this.router.navigate(['/lists', this.listId()], { queryParamsHandling: 'preserve' });
   }
 
+  /** The row the keyboard cursor (j/k) is on; a new list starts with none. */
+  protected readonly highlightedId = linkedSignal<number, number | null>({
+    source: () => this.listId(),
+    computation: () => null,
+  });
+
+  /** The highlighted task while its row is visible. */
+  private readonly highlighted = computed(() => {
+    const id = this.highlightedId();
+    return this.visibleTasks().find((t) => t.id === id);
+  });
+
   /**
-   * Escape closes the panel, or else clears the selection; never while typing in an inline
-   * editor outside the panel.
+   * The single-key shortcuts (listed in the help dialog). They are ignored while typing in a
+   * field, with a modifier held, and, but for ? and Escape, while the help dialog is open.
    */
-  protected onEscape(event: Event): void {
+  protected onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      this.onEscape(event);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if (event.key === '?') {
+      event.preventDefault();
+      this.toggleHelp();
+      return;
+    }
+    if (this.help().nativeElement.open) return;
+    switch (event.key) {
+      case 'n':
+        event.preventDefault();
+        this.addInput().nativeElement.focus();
+        break;
+      case '/':
+        event.preventDefault();
+        this.searchInput().nativeElement.focus();
+        break;
+      case 'j':
+        this.moveHighlight(1);
+        break;
+      case 'k':
+        this.moveHighlight(-1);
+        break;
+      case 'x': {
+        const task = this.highlighted();
+        if (task) void this.toggle(task, !task.completed);
+        break;
+      }
+      case 'Delete': {
+        const task = this.highlighted();
+        if (!task) return;
+        // The cursor moves on to the next row (or the previous one at the end).
+        const rows = this.visibleTasks();
+        const i = rows.indexOf(task);
+        this.highlightedId.set((rows[i + 1] ?? rows[i - 1])?.id ?? null);
+        void this.deleteTask(task);
+        break;
+      }
+      case 'Enter': {
+        // Enter on a focused button, link or checkbox keeps its own meaning.
+        if (target.closest('button, a, input')) return;
+        const task = this.highlighted();
+        if (!task) return;
+        event.preventDefault();
+        void this.router.navigate(['/lists', this.listId(), 'tasks', task.id], { queryParamsHandling: 'preserve' });
+        break;
+      }
+    }
+  }
+
+  /** The first j or k highlights the first row; the cursor stops at either end. */
+  private moveHighlight(delta: 1 | -1): void {
+    const rows = this.visibleTasks();
+    if (rows.length === 0) return;
+    const current = this.highlighted();
+    const i = current ? rows.indexOf(current) + delta : 0;
+    const next = rows[Math.min(Math.max(i, 0), rows.length - 1)];
+    this.highlightedId.set(next.id);
+    this.cdr.detectChanges();
+    document.querySelector(`[data-testid="task-row-${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
+
+  protected toggleHelp(): void {
+    const dialog = this.help().nativeElement;
+    if (dialog.open) dialog.close();
+    else dialog.showModal();
+  }
+
+  /**
+   * Escape closes the help dialog, else the panel, or else clears the selection; never while
+   * typing in an inline editor outside the panel.
+   */
+  private onEscape(event: Event): void {
+    const help = this.help().nativeElement;
+    if (help.open) {
+      help.close();
+      return;
+    }
     const panel = this.panel();
     const target = event.target as HTMLElement;
     if (target.closest('input[type="text"], input[type="search"], textarea, select') && !target.closest('.panel')) return;
