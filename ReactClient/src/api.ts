@@ -72,4 +72,8 @@ export const api = {
   deleteTask: (id: number) => send<void>('DELETE', `/api/tasks/${id}`),
   reorderTasks: (listId: number, orderedIds: number[]) =>
     send<void>('POST', '/api/tasks/reorder', { listId, orderedIds }),
+  addSubtask: (taskId: number, title: string) => send<Subtask>('POST', `/api/tasks/${taskId}/subtasks`, { title }),
+  updateSubtask: (id: number, changes: { title?: string; done?: boolean; position?: number }) =>
+    send<Subtask>('PATCH', `/api/subtasks/${id}`, changes),
+  deleteSubtask: (id: number) => send<void>('DELETE', `/api/subtasks/${id}`),
 }

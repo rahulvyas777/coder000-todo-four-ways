@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type DragEvent, type SetStateAction } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from 'react-router'
-import { api, type Repeat, type TaskChanges, type TaskItem, type TaskList } from './api'
+import { api, type Repeat, type Subtask, type TaskChanges, type TaskItem, type TaskList } from './api'
 
 export default function App() {
   const [lists, setLists] = useState<TaskList[] | null>(null)
@@ -239,10 +239,22 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     adjustCounts(1, created.completed ? 0 : 1)
   }
 
+  function setCompleted(id: number, completed: boolean) {
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, completed } : t)))
+    adjustCounts(0, completed ? -1 : 1)
+  }
+
+  /** Optimistic: the row changes at once (and may leave the view), then takes the server's version. */
   async function toggleTask(task: TaskItem) {
-    const updated = task.completed ? await api.reopenTask(task.id) : (await api.completeTask(task.id)).task
-    replaceTask(updated)
-    if (updated.completed !== task.completed) adjustCounts(0, updated.completed ? -1 : 1)
+    const want = !task.completed
+    setCompleted(task.id, want)
+    try {
+      const updated = want ? (await api.completeTask(task.id)).task : await api.reopenTask(task.id)
+      replaceTask(updated)
+      if (updated.completed !== want) adjustCounts(0, updated.completed ? -1 : 1)
+    } catch {
+      setCompleted(task.id, task.completed)
+    }
   }
 
   async function renameTask(task: TaskItem, title: string) {
@@ -253,6 +265,27 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   async function editTask(task: TaskItem, changes: TaskChanges) {
     replaceTask({ ...task, ...changes })
     replaceTask(await api.updateTask(task.id, changes))
+  }
+
+  /** Applies a change to one task's subtasks; the task itself (completed included) is untouched. */
+  function setSubtasks(taskId: number, fn: (subs: Subtask[]) => Subtask[]) {
+    setTasks((ts) => ts.map((t) => (t.id === taskId ? { ...t, subtasks: fn(t.subtasks) } : t)))
+  }
+
+  async function addSubtask(taskId: number, title: string) {
+    const created = await api.addSubtask(taskId, title)
+    setSubtasks(taskId, (subs) => [...subs, created])
+  }
+
+  async function toggleSubtask(sub: Subtask) {
+    setSubtasks(sub.taskId, (subs) => subs.map((s) => (s.id === sub.id ? { ...s, done: !sub.done } : s)))
+    const updated = await api.updateSubtask(sub.id, { done: !sub.done })
+    setSubtasks(sub.taskId, (subs) => subs.map((s) => (s.id === sub.id ? updated : s)))
+  }
+
+  async function deleteSubtask(sub: Subtask) {
+    await api.deleteSubtask(sub.id)
+    setSubtasks(sub.taskId, (subs) => subs.filter((s) => s.id !== sub.id))
   }
 
   function openTask(id: number) {
@@ -461,6 +494,9 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
         key={openTaskItem.id}
         task={openTaskItem}
         onChange={(changes) => void editTask(openTaskItem, changes)}
+        onAddSubtask={(title) => void addSubtask(openTaskItem.id, title)}
+        onToggleSubtask={(sub) => void toggleSubtask(sub)}
+        onDeleteSubtask={(sub) => void deleteSubtask(sub)}
         onClose={closePanel}
       />
     )}
@@ -570,6 +606,15 @@ function TaskRow(props: {
         )}
       </span>
       <span className="task-meta">
+        {task.subtasks.length > 0 && (
+          <span
+            className="subtask-progress"
+            data-testid={`subtask-progress-${task.id}`}
+            title={`${task.subtasks.filter((s) => s.done).length} of ${task.subtasks.length} subtasks done`}
+          >
+            {task.subtasks.filter((s) => s.done).length}/{task.subtasks.length}
+          </span>
+        )}
         {task.tags.map((tag) => (
           <span key={tag} className="tag" data-testid={`task-tag-${task.id}-${tag}`}>
             {tag}
@@ -680,9 +725,17 @@ function formatDue(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' })
 }
 
-function TaskPanel(props: { task: TaskItem; onChange: (changes: TaskChanges) => void; onClose: () => void }) {
+function TaskPanel(props: {
+  task: TaskItem
+  onChange: (changes: TaskChanges) => void
+  onAddSubtask: (title: string) => void
+  onToggleSubtask: (sub: Subtask) => void
+  onDeleteSubtask: (sub: Subtask) => void
+  onClose: () => void
+}) {
   const { task, onChange, onClose } = props
   const [tagDraft, setTagDraft] = useState('')
+  const [subtaskDraft, setSubtaskDraft] = useState('')
 
   // Escape closes the panel unless an inline editor already handled it.
   useEffect(() => {
@@ -805,6 +858,50 @@ function TaskPanel(props: { task: TaskItem; onChange: (changes: TaskChanges) => 
           </option>
         ))}
       </select>
+
+      <label htmlFor="panel-subtask-add">Subtasks</label>
+      <ul className="subtasks">
+        {task.subtasks.map((s) => (
+          <li key={s.id} className={`subtask-row${s.done ? ' done' : ''}`} data-testid={`subtask-row-${s.id}`}>
+            <input
+              type="checkbox"
+              checked={s.done}
+              data-testid={`subtask-check-${s.id}`}
+              aria-label={`Done: ${s.title}`}
+              onChange={() => props.onToggleSubtask(s)}
+            />
+            <span className="subtask-title">{s.title}</span>
+            <button
+              type="button"
+              className="btn-icon btn-danger"
+              data-testid={`subtask-delete-${s.id}`}
+              aria-label={`Delete subtask ${s.title}`}
+              title="Delete"
+              onClick={() => props.onDeleteSubtask(s)}
+            >
+              <Icon name="i-trash" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <input
+        id="panel-subtask-add"
+        type="text"
+        className="subtask-add"
+        maxLength={200}
+        placeholder="Add a subtask"
+        value={subtaskDraft}
+        data-testid="subtask-add-input"
+        onChange={(e) => setSubtaskDraft(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            const title = subtaskDraft.trim()
+            setSubtaskDraft('')
+            if (title) props.onAddSubtask(title)
+          }
+        }}
+      />
     </aside>
   )
 }
