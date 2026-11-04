@@ -81,6 +81,9 @@ function parse(file) {
         out.total_cost_usd = o.total_cost_usd ?? null;
         out.is_error = o.is_error ?? null;
         out.result_subtype = o.subtype ?? null;
+        // The result line's subagent_stats is authoritative; a system task_started event is
+        // also emitted for background shell tasks (the dry run had one and spawned no subagent).
+        if (o.subagent_stats && typeof o.subagent_stats.spawned === 'number') out.subagents_started = o.subagent_stats.spawned;
         out.terminal_reason = o.terminal_reason ?? null;
         out.api_error_status = o.api_error_status ?? null;
         const u = o.usage || {};
