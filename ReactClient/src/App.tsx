@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type DragEvent, type SetStateAction } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type DragEvent, type SetStateAction } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from 'react-router'
 import { api, type Repeat, type Subtask, type TaskChanges, type TaskItem, type TaskList } from './api'
 
@@ -40,6 +40,23 @@ export default function App() {
     setReloadKey((k) => k + 1)
   }
 
+  // `?` toggles the shortcut help from anywhere but a text field; Escape closes it first, before
+  // the panel and selection listeners (they skip an Escape whose default is prevented).
+  const [helpOpen, setHelpOpen] = useState(false)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && helpOpen) {
+        e.preventDefault()
+        setHelpOpen(false)
+      } else if (e.key === '?' && !hasModifier(e) && !isTyping(e.target)) {
+        e.preventDefault()
+        setHelpOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [helpOpen])
+
   return (
     <div className="app">
       <Sidebar lists={lists ?? []} setLists={setLists} showToast={showToast} />
@@ -60,11 +77,74 @@ export default function App() {
           </button>
         </div>
       )}
+      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
     </div>
   )
 }
 
 const TOAST_MS = 5000
+
+const SHORTCUTS: [keys: string[], action: string][] = [
+  [['n'], 'Add a task'],
+  [['/'], 'Search'],
+  [['j', 'k'], 'Move the highlight down / up'],
+  [['x'], 'Complete or reopen the highlighted task'],
+  [['Del'], 'Delete the highlighted task'],
+  [['Enter'], 'Open the highlighted task'],
+  [['Esc'], 'Close the panel or clear the selection'],
+  [['?'], 'Show or hide this help'],
+]
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = ref.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [])
+
+  return (
+    <dialog
+      ref={ref}
+      className="shortcut-help"
+      data-testid="shortcut-help"
+      aria-labelledby="shortcut-help-title"
+      onCancel={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+    >
+      <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+      <dl>
+        {SHORTCUTS.map(([keys, action]) => (
+          <div key={action} style={{ display: 'contents' }}>
+            <dt>
+              {keys.map((k, i) => (
+                <span key={k}>
+                  {i > 0 && ' / '}
+                  <kbd>{k}</kbd>
+                </span>
+              ))}
+            </dt>
+            <dd>{action}</dd>
+          </div>
+        ))}
+      </dl>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </dialog>
+  )
+}
+
+function hasModifier(e: KeyboardEvent): boolean {
+  return e.ctrlKey || e.metaKey || e.altKey
+}
+
+/** Shortcuts are ignored while the user types in a field. */
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || !!target.closest('input, textarea, select'))
+}
 
 type Toast = { id: number; message: string; undo: () => Promise<unknown> }
 type ShowToast = (message: string, undo: () => Promise<unknown>) => void
@@ -468,6 +548,59 @@ function ListView({
     return () => document.removeEventListener('keydown', onKey)
   }, [hasSelection, listId])
 
+  // Keyboard cursor moved by j/k, tagged with its list like the selection.
+  const [cursor, setCursor] = useState<{ listId: number; id: number | null }>({ listId, id: null })
+  const highlightId = cursor.listId === listId ? cursor.id : null
+  const addInput = useRef<HTMLInputElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
+
+  const onShortcut = useEffectEvent((e: KeyboardEvent) => {
+    if (e.defaultPrevented || hasModifier(e) || isTyping(e.target)) return
+    const rows = visible ?? []
+    const at = rows.findIndex((t) => t.id === highlightId)
+    const current = at >= 0 ? rows[at] : undefined
+    switch (e.key) {
+      case 'n':
+        addInput.current?.focus()
+        break
+      case '/':
+        searchInput.current?.focus()
+        break
+      case 'j':
+      case 'k': {
+        if (rows.length === 0) return
+        const step = e.key === 'j' ? 1 : -1
+        const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.min(Math.max(at + step, 0), rows.length - 1)
+        setCursor({ listId, id: rows[next].id })
+        document.querySelector(`[data-testid="task-row-${rows[next].id}"]`)?.scrollIntoView({ block: 'nearest' })
+        break
+      }
+      case 'x':
+        if (!current) return
+        void toggleTask(current)
+        break
+      case 'Delete':
+        if (!current) return
+        setCursor({ listId, id: rows[at + 1]?.id ?? rows[at - 1]?.id ?? null })
+        void deleteTask(current)
+        break
+      case 'Enter':
+        // Enter on a focused button or link keeps its own meaning.
+        if (!current || (e.target instanceof HTMLElement && e.target.closest('button, a'))) return
+        openTask(current.id)
+        break
+      default:
+        return
+    }
+    e.preventDefault()
+  })
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onShortcut(e)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   /** Runs a bulk action on the selected tasks of this list, then clears the selection. */
   async function runBulk(action: 'complete' | 'delete' | 'move') {
     if (!tasks) return
@@ -530,6 +663,7 @@ function ListView({
           placeholder="Add a task"
           aria-label="Add a task"
           data-testid="task-add-input"
+          ref={addInput}
           disabled={!tasks}
         />
       </form>
@@ -564,6 +698,7 @@ function ListView({
             placeholder="Search tasks"
             aria-label="Search tasks"
             data-testid="search-input"
+            ref={searchInput}
             value={query}
             onChange={(e) => changeQuery(e.currentTarget.value)}
           />
@@ -625,6 +760,7 @@ function ListView({
             key={t.id}
             task={t}
             isOpen={t.id === openId}
+            highlighted={t.id === highlightId}
             selected={selected.has(t.id)}
             onSelect={() => toggleSelected(t.id)}
             drag={
@@ -689,6 +825,7 @@ function dropWhere(e: DragEvent<HTMLElement>): DropWhere {
 function TaskRow(props: {
   task: TaskItem
   isOpen: boolean
+  highlighted: boolean
   selected: boolean
   onSelect: () => void
   drag: RowDrag | null
@@ -702,7 +839,7 @@ function TaskRow(props: {
 
   return (
     <div
-      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${props.selected ? ' selected' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
+      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${props.highlighted ? ' highlighted' : ''}${props.selected ? ' selected' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
       data-testid={`task-row-${task.id}`}
       onClick={(e) => {
         // Clicks on the row's own controls (checkbox, delete, title editor) do not open the panel.
