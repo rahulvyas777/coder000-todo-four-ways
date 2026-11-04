@@ -42,6 +42,8 @@ export interface TaskItem {
   subtasks: Subtask[];
 }
 
+export type BulkAction = 'complete' | 'reopen' | 'delete' | 'restore' | 'move';
+
 @Injectable({ providedIn: 'root' })
 export class Api {
   private readonly http = inject(HttpClient);
@@ -88,6 +90,10 @@ export class Api {
 
   reorderTasks(listId: number, orderedIds: number[]): Observable<void> {
     return this.http.post<void>(`${API_URL}/api/tasks/reorder`, { listId, orderedIds });
+  }
+
+  bulk(ids: number[], action: BulkAction, targetListId?: number): Observable<{ affected: number }> {
+    return this.http.post<{ affected: number }>(`${API_URL}/api/tasks/bulk`, { ids, action, targetListId });
   }
 
   createSubtask(taskId: number, title: string): Observable<Subtask> {

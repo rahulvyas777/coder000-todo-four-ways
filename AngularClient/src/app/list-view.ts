@@ -328,6 +328,70 @@ export class ListView {
     }
   }
 
+  /** The ids of the selected rows; a new list starts with none. */
+  protected readonly selected = linkedSignal<number, ReadonlySet<number>>({
+    source: () => this.listId(),
+    computation: () => new Set(),
+  });
+
+  /** The selected tasks that are still in the list. */
+  private readonly selectedIds = computed(() => {
+    const selected = this.selected();
+    return this.tasks().filter((t) => selected.has(t.id)).map((t) => t.id);
+  });
+
+  protected readonly selectedCount = computed(() => this.selectedIds().length);
+
+  protected readonly allVisibleSelected = computed(() => {
+    const rows = this.visibleTasks();
+    const selected = this.selected();
+    return rows.length > 0 && rows.every((t) => selected.has(t.id));
+  });
+
+  /** The lists a selection can move to: every list but this one. */
+  protected readonly moveTargets = computed(() => this.store.lists().filter((l) => l.id !== this.listId()));
+
+  protected readonly moveTargetId = linkedSignal(() => this.moveTargets()[0]?.id ?? null);
+
+  protected toggleSelected(task: TaskItem, checked: boolean): void {
+    this.selected.update((s) => {
+      const next = new Set(s);
+      if (checked) next.add(task.id);
+      else next.delete(task.id);
+      return next;
+    });
+  }
+
+  /** Selects every visible row, or clears the selection when they all are selected already. */
+  protected toggleSelectAll(): void {
+    this.selected.set(this.allVisibleSelected() ? new Set() : new Set(this.visibleTasks().map((t) => t.id)));
+  }
+
+  protected clearSelection(): void {
+    this.selected.set(new Set());
+  }
+
+  protected async bulk(action: 'complete' | 'delete' | 'move'): Promise<void> {
+    const ids = this.selectedIds();
+    if (ids.length === 0) return;
+    const target = action === 'move' ? this.moveTargetId() : undefined;
+    if (action === 'move' && target == null) return;
+    const listId = this.listId();
+    const affected = new Set(ids);
+    this.clearSelection();
+    await firstValueFrom(this.api.bulk(ids, action, target ?? undefined));
+    if (this.listId() === listId) {
+      this.tasksResource.update((ts) =>
+        action === 'complete'
+          ? (ts ?? []).map((t) => (affected.has(t.id) ? { ...t, completed: true } : t))
+          : (ts ?? []).filter((t) => !affected.has(t.id)),
+      );
+      // Completing a repeating task creates its next occurrence on the server.
+      if (action === 'complete') this.tasksResource.reload();
+    }
+    this.refreshCounts();
+  }
+
   /** A click anywhere on a row (but not on its controls) opens the panel. */
   protected openRow(task: TaskItem, event: MouseEvent): void {
     if ((event.target as HTMLElement).closest('input, button, select, textarea')) return;
@@ -338,13 +402,16 @@ export class ListView {
     void this.router.navigate(['/lists', this.listId()], { queryParamsHandling: 'preserve' });
   }
 
-  /** Escape closes the panel, except while typing in an inline editor outside it. */
+  /**
+   * Escape closes the panel, or else clears the selection; never while typing in an inline
+   * editor outside the panel.
+   */
   protected onEscape(event: Event): void {
     const panel = this.panel();
-    if (!panel) return;
     const target = event.target as HTMLElement;
-    if (target.closest('input, textarea, select') && !target.closest('.panel')) return;
-    panel.close();
+    if (target.closest('input[type="text"], input[type="search"], textarea, select') && !target.closest('.panel')) return;
+    if (panel) panel.close();
+    else this.clearSelection();
   }
 
   protected async saveDetails(task: TaskItem, changes: TaskChanges): Promise<void> {

@@ -41,6 +41,16 @@
   </div>
   <div class="task-add">
     <input
+      type="checkbox"
+      class="select-check"
+      data-testid="select-all"
+      aria-label="Select all visible tasks"
+      title="Select all"
+      [checked]="allVisibleSelected()"
+      [disabled]="visibleTasks().length === 0"
+      (change)="toggleSelectAll(); $any($event.target).checked = allVisibleSelected()"
+    />
+    <input
       #addInput
       type="text"
       data-testid="task-add-input"
@@ -50,6 +60,25 @@
       (keydown.enter)="addTask(addInput)"
     />
   </div>
+  @if (selectedCount() > 0) {
+    <div class="bulk-bar" data-testid="bulk-bar" role="toolbar" aria-label="Bulk actions">
+      <span class="bulk-count" data-testid="bulk-count" aria-live="polite">{{ selectedCount() }} selected</span>
+      <button type="button" data-testid="bulk-complete" (click)="bulk('complete')">Complete</button>
+      <button type="button" class="btn-danger" data-testid="bulk-delete" (click)="bulk('delete')">Delete</button>
+      <select
+        data-testid="bulk-move-target"
+        aria-label="Move to list"
+        (change)="moveTargetId.set(+$any($event.target).value)"
+      >
+        @for (l of moveTargets(); track l.id) {
+          <option [value]="l.id" [selected]="moveTargetId() === l.id">{{ l.name }}</option>
+        }
+      </select>
+      <button type="button" data-testid="bulk-move" [disabled]="moveTargetId() === null" (click)="bulk('move')">
+        Move
+      </button>
+    </div>
+  }
   @if (tasksResource.hasValue() && visibleTasks().length === 0) {
     <!-- Outside the rows' role="list", which may only hold list items. -->
     <p class="empty-state">Nothing here</p>
@@ -62,6 +91,7 @@
         [class.completed]="task.completed"
         [class.overdue]="isOverdue(task)"
         [class.open]="openTaskId() === task.id"
+        [class.selected]="selected().has(task.id)"
         [attr.data-testid]="'task-row-' + task.id"
         [class.dragging]="draggingId() === task.id"
         [class.drop-before]="dropTarget()?.id === task.id && !dropTarget()?.after"
@@ -84,6 +114,14 @@
             <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
           </button>
         }
+        <input
+          type="checkbox"
+          class="select-check"
+          [attr.data-testid]="'select-check-' + task.id"
+          [checked]="selected().has(task.id)"
+          [attr.aria-label]="'Select ' + task.title"
+          (change)="toggleSelected(task, $any($event.target).checked)"
+        />
         <input
           #check
           type="checkbox"
