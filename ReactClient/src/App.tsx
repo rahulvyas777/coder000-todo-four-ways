@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useParams } from 'react-router'
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from 'react-router'
 import { api, type TaskItem, type TaskList } from './api'
 
 export default function App() {
@@ -19,7 +19,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar lists={lists ?? []} />
+      <Sidebar lists={lists ?? []} setLists={setLists} />
       <Routes>
         <Route path="/" element={<Home lists={lists} error={error} />} />
         <Route path="/lists/:listId" element={<ListView lists={lists ?? []} />} />
@@ -30,9 +30,44 @@ export default function App() {
   )
 }
 
-function Sidebar({ lists }: { lists: TaskList[] }) {
-  const { listId } = useParams()
-  const activeId = Number(listId)
+function Icon({ name }: { name: string }) {
+  return (
+    <svg className="icon" aria-hidden="true">
+      <use href={`/icons.svg#${name}`} />
+    </svg>
+  )
+}
+
+type SetLists = Dispatch<SetStateAction<TaskList[] | null>>
+
+function Sidebar({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }) {
+  // The sidebar sits outside <Routes>, so useParams() would be empty here.
+  const match = useMatch('/lists/:listId/*')
+  const activeId = Number(match?.params.listId)
+  const navigate = useNavigate()
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+
+  async function addList(name: string) {
+    setAdding(false)
+    const created = await api.createList(name)
+    setLists((prev) => [...(prev ?? []), created])
+    navigate(`/lists/${created.id}`)
+  }
+
+  async function renameList(id: number, name: string) {
+    setEditingId(null)
+    const updated = await api.updateList(id, { name })
+    setLists((prev) => prev?.map((l) => (l.id === id ? { ...l, ...updated } : l)) ?? null)
+  }
+
+  async function deleteList(list: TaskList) {
+    if (!window.confirm(`Delete the list "${list.name}" and its tasks?`)) return
+    await api.deleteList(list.id)
+    setLists((prev) => prev?.filter((l) => l.id !== list.id) ?? null)
+    if (list.id === activeId) navigate('/', { replace: true })
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
@@ -48,17 +83,112 @@ function Sidebar({ lists }: { lists: TaskList[] }) {
               className={`list-item${l.id === activeId ? ' active' : ''}`}
               data-testid={`list-item-${l.id}`}
             >
-              <Link to={`/lists/${l.id}`} aria-current={l.id === activeId ? 'page' : undefined}>
-                <span>{l.name}</span>
-                <span className="list-count" data-testid={`list-count-${l.id}`} title="Open tasks">
-                  {l.openCount}
-                </span>
-              </Link>
+              {editingId === l.id ? (
+                <NameEditor
+                  label={`Rename list ${l.name}`}
+                  initial={l.name}
+                  onSave={(name) => void renameList(l.id, name)}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <>
+                  <Link
+                    to={`/lists/${l.id}`}
+                    aria-current={l.id === activeId ? 'page' : undefined}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      setEditingId(l.id)
+                    }}
+                  >
+                    <span>{l.name}</span>
+                    <span className="list-count" data-testid={`list-count-${l.id}`} title="Open tasks">
+                      {l.openCount}
+                    </span>
+                  </Link>
+                  <span className="list-actions">
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      data-testid={`list-rename-${l.id}`}
+                      aria-label={`Rename list ${l.name}`}
+                      title="Rename"
+                      onClick={() => setEditingId(l.id)}
+                    >
+                      <Icon name="i-edit" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-icon btn-danger"
+                      data-testid={`list-delete-${l.id}`}
+                      aria-label={`Delete list ${l.name}`}
+                      title="Delete"
+                      onClick={() => void deleteList(l)}
+                    >
+                      <Icon name="i-trash" />
+                    </button>
+                  </span>
+                </>
+              )}
             </li>
           ))}
         </ul>
       </nav>
+      <div className="list-add-row">
+        {adding ? (
+          <NameEditor
+            label="New list name"
+            initial=""
+            placeholder="List name"
+            testId="list-name-input"
+            onSave={(name) => void addList(name)}
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          <button type="button" data-testid="list-add" onClick={() => setAdding(true)}>
+            <Icon name="i-plus" />
+            New list
+          </button>
+        )}
+      </div>
     </aside>
+  )
+}
+
+/** Inline name field: Enter or blur saves a non-empty changed name, Escape cancels. */
+function NameEditor(props: {
+  label: string
+  initial: string
+  placeholder?: string
+  testId?: string
+  onSave: (name: string) => void
+  onCancel: () => void
+}) {
+  const done = useRef(false)
+
+  function finish(value: string | null) {
+    if (done.current) return
+    done.current = true
+    const name = value?.trim() ?? ''
+    if (name && name !== props.initial) props.onSave(name)
+    else props.onCancel()
+  }
+
+  return (
+    <input
+      type="text"
+      autoFocus
+      maxLength={80}
+      defaultValue={props.initial}
+      placeholder={props.placeholder}
+      aria-label={props.label}
+      data-testid={props.testId}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={(e) => finish(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') finish(e.currentTarget.value)
+        else if (e.key === 'Escape') finish(null)
+      }}
+    />
   )
 }
 

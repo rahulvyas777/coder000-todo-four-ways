@@ -42,10 +42,23 @@ export interface TaskItem {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init)
   if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${res.status}`)
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
 }
 
 export const api = {
   lists: (signal?: AbortSignal) => request<TaskList[]>('/api/lists', { signal }),
+  createList: (name: string) => send<TaskList>('POST', '/api/lists', { name }),
+  updateList: (id: number, changes: { name?: string; position?: number }) =>
+    send<TaskList>('PATCH', `/api/lists/${id}`, changes),
+  deleteList: (id: number) => send<void>('DELETE', `/api/lists/${id}`),
   tasks: (listId: number, signal?: AbortSignal) => request<TaskItem[]>(`/api/lists/${listId}/tasks`, { signal }),
 }
