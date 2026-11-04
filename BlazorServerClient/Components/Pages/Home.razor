@@ -92,8 +92,20 @@
                             </button>
                         }
                     </div>
+                    <div class="search">
+                        <input type="search" data-testid="search-input" aria-label="Search tasks" placeholder="Search"
+                               @bind:get="searchText" @bind:set="SetSearch" @bind:event="oninput" />
+                    </div>
+                    <div class="sort">
+                        <select data-testid="sort-select" aria-label="Sort tasks" @bind:get="CurrentSort" @bind:set="SetSort">
+                            @foreach (var (sort, label) in Sorts)
+                            {
+                                <option value="@sort">@label</option>
+                            }
+                        </select>
+                    </div>
                 </div>
-                var visible = tasks.Where(t => InView(t, CurrentView)).ToList();
+                var visible = Sorted(tasks.Where(t => InView(t, CurrentView) && Matches(t, searchText))).ToList();
                 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
                     @if (visible.Count == 0)
                     {
@@ -176,7 +188,10 @@
             notFound = loaded is null;
             tasks = loaded ?? [];
             loadedListId = ListId;
+            pushedQueries.Clear();
         }
+
+        SyncSearchFromUrl();
     }
 
     // Sidebar list editing: add, inline rename, delete.
@@ -339,6 +354,61 @@
 
     private void SetView(string view) =>
         Nav.NavigateTo(Nav.GetUriWithQueryParameter("view", view == "all" ? null : view));
+
+    // Search: ?q= matches title, notes and tags, case-insensitive. The rows are filtered on every
+    // keystroke with no debounce on purpose: the comparison measures rendering, not input throttling.
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+
+    private string searchText = "";
+
+    // Values this page wrote to ?q= itself. Their location-changed callbacks can arrive after the
+    // next keystroke, so they must not overwrite the input; any other ?q= (a link, a reload) does.
+    private readonly HashSet<string> pushedQueries = [];
+
+    private void SyncSearchFromUrl()
+    {
+        var q = Q ?? "";
+        if (pushedQueries.Contains(q)) return;
+        pushedQueries.Clear();
+        searchText = q;
+    }
+
+    private void SetSearch(string? value)
+    {
+        searchText = value ?? "";
+        pushedQueries.Add(searchText);
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", searchText.Length == 0 ? null : searchText), replace: true);
+    }
+
+    private static bool Matches(TaskItem t, string q)
+    {
+        q = q.Trim();
+        if (q.Length == 0) return true;
+        return t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || t.Notes.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || t.Tags.Any(tag => tag.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Sort: ?sort= picks the order; manual (the default) is the list's position order.
+    [SupplyParameterFromQuery(Name = "sort")] public string? Sort { get; set; }
+
+    private static readonly (string Sort, string Label)[] Sorts =
+        [("manual", "Manual"), ("due", "Due date"), ("priority", "Priority"), ("title", "Title"), ("created", "Created")];
+
+    private string CurrentSort => Sorts.Any(s => s.Sort == Sort) ? Sort! : "manual";
+
+    private void SetSort(string? sort) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("sort", sort is null or "manual" ? null : sort));
+
+    // Ties fall back to the manual order so every sort is stable and deterministic.
+    private IEnumerable<TaskItem> Sorted(IEnumerable<TaskItem> items) => CurrentSort switch
+    {
+        "due" => items.OrderBy(t => t.DueDate is null).ThenBy(t => t.DueDate).ThenBy(t => t.Position),
+        "priority" => items.OrderByDescending(t => t.Priority).ThenBy(t => t.Position),
+        "title" => items.OrderBy(t => t.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(t => t.Position),
+        "created" => items.OrderBy(t => t.CreatedAt).ThenBy(t => t.Id),
+        _ => items.OrderBy(t => t.Position).ThenBy(t => t.Id),
+    };
 
     private string? RowClass(TaskItem t)
     {
