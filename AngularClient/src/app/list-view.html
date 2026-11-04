@@ -84,11 +84,23 @@
     <!-- Outside the rows' role="list", which may only hold list items. -->
     <p class="empty-state">Nothing here</p>
   }
-  <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
-    @for (task of visibleTasks(); track task.id) {
+  <div
+    #rows
+    class="rows-container"
+    data-testid="rows-container"
+    role="list"
+    aria-label="Tasks"
+    (scroll)="onRowsScroll()"
+  >
+    <!-- Only the rows in and near the viewport are rendered; the spacer keeps the full height. -->
+    <div class="rows-spacer" role="none" [style.height.px]="visibleTasks().length * rowHeight">
+    @for (task of rowWindow().rows; track task.id; let i = $index) {
       <div
         class="task-row"
         role="listitem"
+        [style.top.px]="(rowWindow().start + i) * rowHeight"
+        [attr.aria-posinset]="rowWindow().start + i + 1"
+        [attr.aria-setsize]="visibleTasks().length"
         [class.completed]="task.completed"
         [class.overdue]="isOverdue(task)"
         [class.open]="openTaskId() === task.id"
@@ -200,6 +212,7 @@
         </button>
       </div>
     }
+    </div>
   </div>
 </div>
 @if (openTask(); as t) {

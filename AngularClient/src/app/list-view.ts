@@ -1,4 +1,19 @@
-import { ChangeDetectorRef, Component, ElementRef, computed, inject, input, linkedSignal, numberAttribute, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  linkedSignal,
+  numberAttribute,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { httpResource } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
@@ -8,6 +23,12 @@ import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
 import { TaskChanges, TaskPanel } from './task-panel';
 import { UndoService } from './undo';
+
+/** The fixed row height of the shared stylesheet (`--row-h`). */
+const ROW_HEIGHT = 40;
+
+/** Rows rendered above and below the viewport, so short lists render whole and scrolling has no gaps. */
+const OVERSCAN_ROWS = 40;
 
 type View = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed';
 
@@ -183,6 +204,70 @@ export class ListView {
     // Array.prototype.sort is stable, so ties stay in manual order.
     return sort === 'manual' ? rows : rows.sort((a, b) => compare(sort, a, b));
   });
+
+  /**
+   * Hand-rolled windowing: rows are a fixed 40 px (`--row-h` in the shared stylesheet), so the
+   * rows in view follow from the scroll offset alone. Only those, plus an overscan on each side,
+   * are in the DOM; the spacer inside `rows-container` keeps the full scroll height.
+   */
+  protected readonly rowHeight = ROW_HEIGHT;
+
+  private readonly rowsEl = viewChild<ElementRef<HTMLElement>>('rows');
+
+  /** The index of the first row at the top of the viewport. */
+  private readonly firstInView = signal(0);
+
+  /** How many rows fit in the viewport. */
+  private readonly rowsInView = signal(Math.ceil(window.innerHeight / ROW_HEIGHT));
+
+  protected readonly rowWindow = computed(() => {
+    const rows = this.visibleTasks();
+    const inView = this.rowsInView();
+    // Clamped, so a shorter result never renders an empty window before the scroll event.
+    const first = Math.min(this.firstInView(), Math.max(0, rows.length - inView));
+    const start = Math.max(0, first - OVERSCAN_ROWS);
+    const end = Math.min(rows.length, first + inView + OVERSCAN_ROWS);
+    return { start, rows: rows.slice(start, end) };
+  });
+
+  protected onRowsScroll(): void {
+    // The signal only changes when a new row reaches the top, so most scroll events render nothing.
+    this.firstInView.set(Math.floor(this.rowsEl()!.nativeElement.scrollTop / ROW_HEIGHT));
+  }
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const el = this.rowsEl()!.nativeElement;
+      const observer = new ResizeObserver(() => this.rowsInView.set(Math.ceil(el.clientHeight / ROW_HEIGHT) + 1));
+      observer.observe(el);
+      destroyRef.onDestroy(() => observer.disconnect());
+    });
+    // Another list, filter, search or sort starts at the top.
+    effect(() => {
+      this.listId();
+      this.view();
+      this.sort();
+      this.query();
+      untracked(() => this.scrollRowsTo(0));
+    });
+  }
+
+  private scrollRowsTo(top: number): void {
+    // Not rendered yet on the first run of the effect above.
+    const el = this.rowsEl()?.nativeElement;
+    if (!el) return;
+    el.scrollTop = top;
+    this.firstInView.set(Math.floor(el.scrollTop / ROW_HEIGHT));
+  }
+
+  /** Scrolls the least needed to show row `index` (it may not be rendered yet). */
+  private scrollRowIntoView(index: number): void {
+    const el = this.rowsEl()!.nativeElement;
+    const top = index * ROW_HEIGHT;
+    if (top < el.scrollTop) this.scrollRowsTo(top);
+    else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) this.scrollRowsTo(top + ROW_HEIGHT - el.clientHeight);
+  }
 
   protected setView(view: View): void {
     void this.router.navigate([], {
@@ -521,10 +606,11 @@ export class ListView {
     if (rows.length === 0) return;
     const current = this.highlighted();
     const i = current ? rows.indexOf(current) + delta : 0;
-    const next = rows[Math.min(Math.max(i, 0), rows.length - 1)];
-    this.highlightedId.set(next.id);
+    const index = Math.min(Math.max(i, 0), rows.length - 1);
+    this.highlightedId.set(rows[index].id);
+    // The row may be outside the rendered window, so scroll by its index rather than its element.
+    this.scrollRowIntoView(index);
     this.cdr.detectChanges();
-    document.querySelector(`[data-testid="task-row-${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
   }
 
   protected toggleHelp(): void {
