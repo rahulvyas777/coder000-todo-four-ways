@@ -432,9 +432,22 @@ function ListView({
     const want = !task.completed
     setCompleted(task.id, want)
     try {
-      const updated = want ? (await api.completeTask(task.id)).task : await api.reopenTask(task.id)
+      const { task: updated, next } = want
+        ? await api.completeTask(task.id)
+        : { task: await api.reopenTask(task.id), next: null }
       replaceTask(updated)
       if (updated.completed !== want) adjustCounts(0, updated.completed ? -1 : 1)
+      // A repeating task comes back with its next occurrence; Undo reopens this one and drops that.
+      if (next) {
+        if (next.listId === listId) {
+          setTasks((ts) => (ts.some((t) => t.id === next.id) ? ts : [...ts, next]))
+          adjustCounts(1, next.completed ? 0 : 1)
+        }
+        showToast(`Completed "${task.title}"`, async () => {
+          await api.reopenTask(task.id)
+          await api.deleteTask(next.id)
+        })
+      }
     } catch {
       setCompleted(task.id, task.completed)
     }
@@ -1008,6 +1021,17 @@ function TaskRow(props: {
           <time className="task-due" dateTime={task.dueDate} data-testid={`task-due-${task.id}`}>
             {formatDue(task.dueDate)}
           </time>
+        )}
+        {task.repeat !== 'none' && (
+          <span
+            className="task-repeat"
+            role="img"
+            aria-label={`Repeats ${task.repeat}`}
+            title={`Repeats ${task.repeat}`}
+            data-testid={`task-repeat-${task.id}`}
+          >
+            <Icon name="i-repeat" />
+          </span>
         )}
         {task.priority > 0 && (
           <span
