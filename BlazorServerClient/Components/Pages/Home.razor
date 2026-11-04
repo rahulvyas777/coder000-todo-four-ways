@@ -1,7 +1,86 @@
-﻿@page "/"
+@page "/"
+@page "/lists/{ListId:int}"
+@page "/lists/{ListId:int}/tasks/{TaskId:int}"
+@using BlazorServerClient.Services
+@inject TasksApi Api
+@inject NavigationManager Nav
 
-<PageTitle>Home</PageTitle>
+<PageTitle>@(CurrentList is null ? "Tasks" : $"{CurrentList.Name} · Tasks")</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="app">
+    <aside class="sidebar" aria-label="Lists">
+        <div class="sidebar-head">
+            <h1 class="app-title" data-testid="app-title">Tasks</h1>
+        </div>
+        <nav aria-label="Lists">
+            <ul class="list-nav" data-testid="list-nav">
+                @foreach (var l in lists)
+                {
+                    <li class="list-item @(l.Id == ListId ? "active" : null)" data-testid="list-item-@l.Id">
+                        <a href="lists/@l.Id" aria-current="@(l.Id == ListId ? "page" : null)">
+                            <span>@l.Name</span>
+                            <span class="list-count" data-testid="list-count-@l.Id">@l.OpenCount<span class="visually-hidden"> open</span></span>
+                        </a>
+                    </li>
+                }
+            </ul>
+        </nav>
+    </aside>
 
-Welcome to your new app.
+    <main class="main">
+        @if (notFound)
+        {
+            <div class="main-head"><h2>List not found</h2></div>
+            <p class="empty-state">This list does not exist or was deleted.</p>
+        }
+        else
+        {
+            <div class="main-head">
+                <h2>@CurrentList?.Name</h2>
+                <span class="task-count" data-testid="task-count">@OpenCount of @tasks.Count open</span>
+            </div>
+            <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
+                @foreach (var t in tasks)
+                {
+                    <div class="task-row @(t.Completed ? "completed" : null)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id">
+                        <input type="checkbox" class="task-check" data-testid="task-check-@t.Id"
+                               checked="@t.Completed" disabled aria-label="Completed: @t.Title" />
+                        <span class="task-title" data-testid="task-title-@t.Id">@t.Title</span>
+                    </div>
+                }
+            </div>
+        }
+    </main>
+</div>
+
+@code {
+    [Parameter] public int? ListId { get; set; }
+    [Parameter] public int? TaskId { get; set; }
+
+    private List<TaskList> lists = [];
+    private List<TaskItem> tasks = [];
+    private int? loadedListId;
+    private bool notFound;
+
+    private TaskList? CurrentList => lists.FirstOrDefault(l => l.Id == ListId);
+    private int OpenCount => tasks.Count(t => !t.Completed);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        lists = await Api.GetListsAsync();
+
+        if (ListId is null)
+        {
+            if (lists.Count > 0) Nav.NavigateTo($"lists/{lists[0].Id}", replace: true);
+            return;
+        }
+
+        if (loadedListId != ListId)
+        {
+            var loaded = await Api.GetTasksAsync(ListId.Value);
+            notFound = loaded is null;
+            tasks = loaded ?? [];
+            loadedListId = ListId;
+        }
+    }
+}
