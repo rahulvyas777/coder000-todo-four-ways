@@ -14,6 +14,10 @@
         <div class="sidebar-head">
             <h1 class="app-title" data-testid="app-title">Tasks</h1>
             <div class="sidebar-tools">
+                <button type="button" class="btn-icon theme-toggle" data-testid="theme-toggle" aria-label="Toggle dark mode">
+                    <svg class="icon icon-moon" aria-hidden="true"><use href="icons.svg#i-moon" /></svg>
+                    <svg class="icon icon-sun" aria-hidden="true"><use href="icons.svg#i-sun" /></svg>
+                </button>
                 <button type="button" class="btn-icon" data-testid="list-add" aria-label="Add list"
                         aria-expanded="@(adding ? "true" : "false")" @onclick="StartAdd">
                     <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
