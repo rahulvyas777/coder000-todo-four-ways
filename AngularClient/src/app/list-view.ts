@@ -1,22 +1,47 @@
-import { Component, computed, inject, input, numberAttribute, signal } from '@angular/core';
+import { Component, computed, inject, input, numberAttribute, signal, viewChild } from '@angular/core';
 import { httpResource } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
+import { filter, firstValueFrom, map } from 'rxjs';
 import { API_URL, Api, TaskItem } from './api';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
+import { TaskChanges, TaskPanel } from './task-panel';
 
-/** The main column for `/lists/{listId}`: header, task count, the add input and the task rows. */
+/**
+ * The main column for `/lists/{listId}` (header, task count, the add input and the task rows)
+ * and, for `/lists/{listId}/tasks/{taskId}`, the detail panel next to it.
+ */
 @Component({
   selector: 'app-list-view',
   templateUrl: './list-view.html',
-  imports: [Autofocus],
-  host: { class: 'main' },
+  imports: [Autofocus, TaskPanel],
+  // The main column and the panel are cells of the shell's grid.
+  host: { style: 'display: contents', '(document:keydown.escape)': 'onEscape($event)' },
 })
 export class ListView {
   private readonly api = inject(Api);
   private readonly store = inject(ListsStore);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly listId = input.required({ transform: numberAttribute });
+
+  /** The task of `/lists/{l}/tasks/{t}`, null on `/lists/{l}`. */
+  protected readonly openTaskId = toSignal(
+    this.router.events.pipe(
+      filter((e) => e instanceof NavigationEnd),
+      map(() => this.taskIdInUrl()),
+    ),
+    { initialValue: this.taskIdInUrl() },
+  );
+
+  protected readonly openTask = computed(() => {
+    const id = this.openTaskId();
+    return id === null ? undefined : this.tasks().find((t) => t.id === id);
+  });
+
+  private readonly panel = viewChild(TaskPanel);
 
   protected readonly list = computed(() => this.store.lists().find((l) => l.id === this.listId()));
 
@@ -89,6 +114,60 @@ export class ListView {
     await firstValueFrom(this.api.deleteTask(task.id));
     this.tasksResource.update((ts) => (ts ?? []).filter((t) => t.id !== task.id));
     this.refreshCounts();
+  }
+
+  /** A click anywhere on a row (but not on its controls) opens the panel. */
+  protected openRow(task: TaskItem, event: MouseEvent): void {
+    if ((event.target as HTMLElement).closest('input, button, select, textarea')) return;
+    void this.router.navigate(['/lists', this.listId(), 'tasks', task.id], { queryParamsHandling: 'preserve' });
+  }
+
+  protected closePanel(): void {
+    void this.router.navigate(['/lists', this.listId()], { queryParamsHandling: 'preserve' });
+  }
+
+  /** Escape closes the panel, except while typing in an inline editor outside it. */
+  protected onEscape(event: Event): void {
+    const panel = this.panel();
+    if (!panel) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select') && !target.closest('.panel')) return;
+    panel.close();
+  }
+
+  protected async saveDetails(task: TaskItem, changes: TaskChanges): Promise<void> {
+    const before = this.tasks().find((t) => t.id === task.id) ?? task;
+    this.replace({ ...before, ...changes });
+    try {
+      this.replace(await firstValueFrom(this.api.updateTask(task.id, changes)));
+    } catch {
+      this.replace(before);
+    }
+  }
+
+  /** Short local date for the rows, e.g. "Nov 7" (the year only when it is not this year). */
+  protected formatDue(iso: string): string {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const sameYear = y === new Date().getFullYear();
+    return date.toLocaleDateString('en-US', sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  protected isOverdue(task: TaskItem): boolean {
+    return !task.completed && !!task.dueDate && task.dueDate < this.today();
+  }
+
+  protected readonly priorityNames = ['None', 'Low', 'Medium', 'High'];
+
+  private today(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  private taskIdInUrl(): number | null {
+    // While the view is first created the child route has no snapshot yet; NavigationEnd follows.
+    const id = this.route.firstChild?.snapshot?.paramMap.get('taskId');
+    return id ? Number(id) : null;
   }
 
   private replace(task: TaskItem): void {

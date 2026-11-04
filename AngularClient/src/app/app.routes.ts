@@ -12,7 +12,14 @@ const firstList: CanActivateFn = async () => {
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', canActivate: [firstList], children: [] },
-  { path: 'lists/:listId', component: ListView },
-  { path: 'lists/:listId/tasks/:taskId', component: ListView },
+  // One parent route, so opening and closing the panel keeps the list view (and its tasks).
+  {
+    path: 'lists/:listId',
+    component: ListView,
+    children: [
+      { path: '', children: [] },
+      { path: 'tasks/:taskId', children: [] },
+    ],
+  },
   { path: '**', redirectTo: '' },
 ];
