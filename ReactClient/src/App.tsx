@@ -157,6 +157,40 @@ function Icon({ name }: { name: string }) {
   )
 }
 
+type Theme = 'light' | 'dark'
+const THEME_KEY = 'tasks-theme'
+
+/** index.html sets data-theme before the first paint; this reads it and owns it from then on. */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() =>
+    document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light',
+  )
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  function toggle() {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    localStorage.setItem(THEME_KEY, next)
+    setTheme(next)
+  }
+
+  const label = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+  return (
+    <button
+      type="button"
+      className="btn-icon"
+      data-testid="theme-toggle"
+      aria-label={label}
+      title={label}
+      onClick={toggle}
+    >
+      <Icon name={theme === 'dark' ? 'i-sun' : 'i-moon'} />
+    </button>
+  )
+}
+
 type SetLists = Dispatch<SetStateAction<TaskList[] | null>>
 
 function Sidebar({ lists, setLists, showToast }: { lists: TaskList[]; setLists: SetLists; showToast: ShowToast }) {
@@ -198,6 +232,9 @@ function Sidebar({ lists, setLists, showToast }: { lists: TaskList[]; setLists: 
         <h1 className="app-title" data-testid="app-title">
           Tasks
         </h1>
+        <div className="sidebar-tools">
+          <ThemeToggle />
+        </div>
       </div>
       <nav aria-label="Lists">
         <ul className="list-nav" data-testid="list-nav">

@@ -6,6 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/app.css" />
     <title>Tasks</title>
+    <script>
+      // Set the theme before the first paint (no flash): the stored choice, else the system's.
+      ;(function () {
+        var t = null
+        try {
+          t = localStorage.getItem('tasks-theme')
+        } catch (e) {}
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        document.documentElement.setAttribute('data-theme', t)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
