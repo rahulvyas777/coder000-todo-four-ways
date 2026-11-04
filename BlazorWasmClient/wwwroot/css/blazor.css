@@ -8,3 +8,9 @@
   box-shadow: var(--shadow);
 }
 #blazor-error-ui .dismiss { position: absolute; right: 12px; top: 4px; }
+
+/* Export links and the import file input (hidden inside its label, which looks like a button). */
+.transfer { display: flex; gap: 8px; align-items: center; }
+.transfer .btn { color: inherit; text-decoration: none; }
+.import-label { cursor: pointer; }
+.import-label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }

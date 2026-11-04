@@ -16,6 +16,21 @@
     {
         <span class="task-count" data-testid="task-count">@OpenCount of @_tasks.Count open</span>
     }
+    <div class="transfer" role="group" aria-label="Import and export">
+        @if (List is not null)
+        {
+            @* Plain links: the API sends Content-Disposition: attachment, so the browser downloads <list>.json/.csv. *@
+            <a class="btn" href="@Api.ExportUrl(ListId, "json")" download data-testid="export-json"
+               aria-label="@($"Export {List.Name} as JSON")">Export JSON</a>
+            <a class="btn" href="@Api.ExportUrl(ListId, "csv")" download data-testid="export-csv"
+               aria-label="@($"Export {List.Name} as CSV")">Export CSV</a>
+        }
+        <label class="btn import-label">
+            Import JSON
+            <InputFile class="visually-hidden" accept=".json,application/json" data-testid="import-input"
+                       OnChange="ImportFile" disabled="@_importing" />
+        </label>
+    </div>
 </div>
 
 @if (_tasks is not null)
@@ -315,6 +330,36 @@
     private ElementReference _editInput;
     private bool _focusEdit;
     private string? _actionError;
+
+    // ---- Import (export is a plain link to the API) ----
+
+    private const long MaxImportBytes = 10 * 1024 * 1024;
+    private bool _importing;
+
+    private async Task ImportFile(InputFileChangeEventArgs e)
+    {
+        _importing = true;
+        _actionError = null;
+        try
+        {
+            string json;
+            await using (var stream = e.File.OpenReadStream(MaxImportBytes))
+            using (var reader = new StreamReader(stream))
+            {
+                json = await reader.ReadToEndAsync();
+            }
+            var list = await State.ImportListAsync(json);
+            Nav.NavigateTo($"lists/{list.Id}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            _actionError = $"The import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
 
     // ---- Filters (?view=) ----
 

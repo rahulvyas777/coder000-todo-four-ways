@@ -51,6 +51,13 @@ public sealed class AppState(ApiClient api)
         await ReloadListsAsync();
     }
 
+    public async Task<TaskList> ImportListAsync(string json)
+    {
+        var list = await api.ImportListAsync(json);
+        await ReloadListsAsync();
+        return list;
+    }
+
     /// <summary>Restores a soft-deleted list (the API restores its tasks with it).</summary>
     public async Task RestoreListAsync(int id)
     {

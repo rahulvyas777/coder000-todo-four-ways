@@ -34,6 +34,19 @@ public sealed class ApiClient(HttpClient http)
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Absolute URL of the export endpoint; the API answers with an attachment download.</summary>
+    public string ExportUrl(int listId, string format) =>
+        new Uri(http.BaseAddress!, $"api/lists/{listId}/export?format={format}").ToString();
+
+    /// <summary>Posts the JSON of an export file ({name, tasks}) as it is and returns the new list.</summary>
+    public async Task<TaskList> ImportListAsync(string json)
+    {
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var response = await http.PostAsync("api/lists/import", content);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
     public async Task<List<TaskItem>> GetTasksAsync(int listId) =>
         await http.GetFromJsonAsync<List<TaskItem>>($"api/lists/{listId}/tasks") ?? [];
 
