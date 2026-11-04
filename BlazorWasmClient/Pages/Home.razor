@@ -1,7 +1,22 @@
-﻿@page "/"
+@page "/"
+@inject AppState State
+@inject NavigationManager Nav
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Tasks</PageTitle>
 
-<h1>Hello, world!</h1>
+@if (State.ListsLoaded && State.Lists.Count == 0)
+{
+    <p class="empty-state">@(State.Error ?? "No lists yet.")</p>
+}
 
-Welcome to your new app.
+@code {
+    // "/" redirects to the first list (the API returns them ordered by position).
+    protected override async Task OnInitializedAsync()
+    {
+        await State.EnsureListsAsync();
+        if (State.Lists.Count > 0)
+        {
+            Nav.NavigateTo($"lists/{State.Lists[0].Id}", replace: true);
+        }
+    }
+}

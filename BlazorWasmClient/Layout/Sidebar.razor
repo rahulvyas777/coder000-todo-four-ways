@@ -1,0 +1,59 @@
+@using System.Text.RegularExpressions
+@implements IDisposable
+@inject AppState State
+@inject NavigationManager Nav
+
+<aside class="sidebar" aria-label="Lists">
+    <div class="sidebar-head">
+        <h1 class="app-title" data-testid="app-title">Tasks</h1>
+    </div>
+    @if (State.Error is not null)
+    {
+        <p class="empty-state" role="alert">@State.Error</p>
+    }
+    <ul class="list-nav" data-testid="list-nav">
+        @foreach (var list in State.Lists)
+        {
+            var active = list.Id == _activeListId;
+            <li class="list-item @(active ? "active" : null)" data-testid="list-item-@list.Id">
+                <a href="lists/@list.Id" aria-current="@(active ? "page" : null)">
+                    <span>@list.Name</span>
+                    <span class="list-count" data-testid="list-count-@list.Id"
+                          aria-label="@($"{list.OpenCount} open")">@list.OpenCount</span>
+                </a>
+            </li>
+        }
+    </ul>
+</aside>
+
+@code {
+    private int? _activeListId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnStateChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        _activeListId = ListIdFromUri(Nav.Uri);
+        await State.EnsureListsAsync();
+    }
+
+    private static int? ListIdFromUri(string uri)
+    {
+        var m = Regex.Match(uri, @"/lists/(\d+)");
+        return m.Success ? int.Parse(m.Groups[1].Value) : null;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _activeListId = ListIdFromUri(e.Location);
+        StateHasChanged();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

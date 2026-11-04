@@ -1,0 +1,10 @@
+/* Client-specific styles; the shared look lives in ../app.css (copied unchanged). */
+
+/* Blazor's unhandled-error bar, hidden until the framework shows it. */
+#blazor-error-ui {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+  padding: 8px 16px; background: var(--danger-soft); color: var(--text);
+  box-shadow: var(--shadow);
+}
+#blazor-error-ui .dismiss { position: absolute; right: 12px; top: 4px; }

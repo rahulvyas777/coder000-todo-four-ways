@@ -1,0 +1,90 @@
+@page "/lists/{ListId:int}"
+@page "/lists/{ListId:int}/tasks/{TaskId:int}"
+@implements IDisposable
+@inject ApiClient Api
+@inject AppState State
+
+<PageTitle>@(List?.Name ?? "Tasks") · Tasks</PageTitle>
+
+<div class="main-head">
+    <h2>@(List?.Name ?? (State.ListsLoaded ? "List not found" : ""))</h2>
+    @if (_tasks is not null)
+    {
+        <span class="task-count" data-testid="task-count">@OpenCount of @_tasks.Count open</span>
+    }
+</div>
+
+<div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
+    @if (_error is not null)
+    {
+        <p class="empty-state" role="alert">@_error</p>
+    }
+    else if (_tasks is null)
+    {
+        <p class="empty-state">Loading…</p>
+    }
+    else if (_tasks.Count == 0)
+    {
+        <p class="empty-state">Nothing here</p>
+    }
+    else
+    {
+        @foreach (var task in _tasks)
+        {
+            <div class="task-row @(task.Completed ? "completed" : null)" role="listitem"
+                 data-testid="task-row-@task.Id" @key="task.Id">
+                @* Read-only until step 02 makes it toggle. *@
+                <input type="checkbox" class="task-check" data-testid="task-check-@task.Id"
+                       checked="@task.Completed" disabled aria-label="@($"Completed: {task.Title}")" />
+                <span class="task-title" data-testid="task-title-@task.Id">@task.Title</span>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int ListId { get; set; }
+    [Parameter] public int? TaskId { get; set; }
+
+    private List<TaskItem>? _tasks;
+    private string? _error;
+    private int _loadedListId;
+    private int _loadVersion;
+
+    private TaskList? List => State.FindList(ListId);
+    private int OpenCount => _tasks?.Count(t => !t.Completed) ?? 0;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+        _ = State.EnsureListsAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ListId == _loadedListId) return;
+        _loadedListId = ListId;
+        _tasks = null;
+        _error = null;
+        // A slower response for a list the user already left must not overwrite the new one.
+        var version = ++_loadVersion;
+        try
+        {
+            var tasks = await Api.GetTasksAsync(ListId);
+            if (version == _loadVersion) _tasks = tasks;
+        }
+        catch (HttpRequestException ex)
+        {
+            if (version == _loadVersion)
+            {
+                _error = ex.StatusCode == System.Net.HttpStatusCode.NotFound
+                    ? "This list does not exist."
+                    : $"Could not load the tasks: {ex.Message}";
+            }
+        }
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}
