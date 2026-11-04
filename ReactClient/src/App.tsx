@@ -288,14 +288,45 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   const params = new URLSearchParams(search)
   const view = parseView(params.get('view'))
   const today = todayIso()
-  const visible = tasks?.filter((t) => VIEWS[view].test(t, today)) ?? null
+  const sort = parseSort(params.get('sort'))
+
+  // The search box keeps its own state so typing never waits for the router's (transition)
+  // update of the URL; the URL follows, and an outside URL change (back, a link) resets the box.
+  const urlQuery = params.get('q') ?? ''
+  const [query, setQuery] = useState(urlQuery)
+  const pushedQuery = useRef(urlQuery)
+  useEffect(() => {
+    if (urlQuery !== pushedQuery.current) {
+      pushedQuery.current = urlQuery
+      setQuery(urlQuery)
+    }
+  }, [urlQuery])
+
+  const needle = query.trim().toLowerCase()
+  const visible = tasks
+    ? sortTasks(
+        tasks.filter((t) => VIEWS[view].test(t, today) && matchesSearch(t, needle)),
+        sort,
+      )
+    : null
+
+  function setParam(name: string, value: string | null, replace = false) {
+    const p = new URLSearchParams(search)
+    if (value === null) p.delete(name)
+    else p.set(name, value)
+    const qs = p.toString()
+    navigate({ search: qs ? `?${qs}` : '' }, { replace })
+  }
 
   function selectView(next: View) {
-    const p = new URLSearchParams(search)
-    if (next === 'all') p.delete('view')
-    else p.set('view', next)
-    const qs = p.toString()
-    navigate({ search: qs ? `?${qs}` : '' })
+    setParam('view', next === 'all' ? null : next)
+  }
+
+  // Filters on every keystroke with no debounce on purpose: the comparison measures rendering.
+  function changeQuery(next: string) {
+    setQuery(next)
+    pushedQuery.current = next
+    setParam('q', next === '' ? null : next, true)
   }
 
   return (
@@ -341,6 +372,30 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
               {VIEWS[v].label} <span className="count">{tasks ? tasks.filter((t) => VIEWS[v].test(t, today)).length : ''}</span>
             </button>
           ))}
+        </div>
+        <div className="search">
+          <input
+            type="search"
+            placeholder="Search tasks"
+            aria-label="Search tasks"
+            data-testid="search-input"
+            value={query}
+            onChange={(e) => changeQuery(e.currentTarget.value)}
+          />
+        </div>
+        <div className="sort">
+          <select
+            aria-label="Sort by"
+            data-testid="sort-select"
+            value={sort}
+            onChange={(e) => setParam('sort', e.currentTarget.value === 'manual' ? null : e.currentTarget.value)}
+          >
+            {SORT_ORDER.map((s) => (
+              <option key={s} value={s}>
+                {SORTS[s].label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="rows-container" data-testid="rows-container">
@@ -477,6 +532,41 @@ const VIEW_ORDER = Object.keys(VIEWS) as View[]
 
 function parseView(value: string | null): View {
   return VIEW_ORDER.includes(value as View) ? (value as View) : 'all'
+}
+
+/** `needle` is already trimmed and lower-cased; tags are lower-case by contract. */
+function matchesSearch(t: TaskItem, needle: string): boolean {
+  if (!needle) return true
+  return (
+    t.title.toLowerCase().includes(needle) ||
+    t.notes.toLowerCase().includes(needle) ||
+    t.tags.some((tag) => tag.includes(needle))
+  )
+}
+
+type Sort = 'manual' | 'due' | 'priority' | 'title' | 'created'
+
+/** The ?sort= orders; the tasks arrive in manual order and Array.sort is stable, so ties keep it. */
+const SORTS: Record<Sort, { label: string; compare: ((a: TaskItem, b: TaskItem) => number) | null }> = {
+  manual: { label: 'Manual', compare: null },
+  due: {
+    label: 'Due date',
+    compare: (a, b) =>
+      a.dueDate === b.dueDate ? 0 : a.dueDate === null ? 1 : b.dueDate === null ? -1 : a.dueDate < b.dueDate ? -1 : 1,
+  },
+  priority: { label: 'Priority', compare: (a, b) => b.priority - a.priority },
+  title: { label: 'Title', compare: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) },
+  created: { label: 'Created', compare: (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id },
+}
+const SORT_ORDER = Object.keys(SORTS) as Sort[]
+
+function parseSort(value: string | null): Sort {
+  return SORT_ORDER.includes(value as Sort) ? (value as Sort) : 'manual'
+}
+
+function sortTasks(tasks: TaskItem[], sort: Sort): TaskItem[] {
+  const compare = SORTS[sort].compare
+  return compare ? [...tasks].sort(compare) : tasks
 }
 
 function isOverdue(task: TaskItem): boolean {
