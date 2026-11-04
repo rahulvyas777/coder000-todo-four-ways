@@ -168,6 +168,16 @@
               formatDue(task.dueDate)
             }}</time>
           }
+          @if (task.repeat !== 'none') {
+            <span
+              class="task-repeat"
+              role="img"
+              [attr.data-testid]="'task-repeat-' + task.id"
+              [attr.aria-label]="'Repeats ' + task.repeat"
+              [attr.title]="'Repeats ' + task.repeat"
+              ><svg class="icon" aria-hidden="true"><use href="icons.svg#i-repeat" /></svg
+            ></span>
+          }
           @if (task.priority > 0) {
             <span
               role="img"

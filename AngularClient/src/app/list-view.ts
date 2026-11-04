@@ -230,15 +230,33 @@ export class ListView {
     this.replace({ ...task, completed });
     // Render it inside the click, so the row never shows the old state after the server answers.
     this.cdr.detectChanges();
+    const listId = this.listId();
+    let next: TaskItem | null = null;
     try {
-      const saved = completed
-        ? (await firstValueFrom(this.api.completeTask(task.id))).task
-        : await firstValueFrom(this.api.reopenTask(task.id));
-      this.replace(saved);
+      if (completed) {
+        const result = await firstValueFrom(this.api.completeTask(task.id));
+        next = result.next;
+        this.replace(result.task);
+      } else {
+        this.replace(await firstValueFrom(this.api.reopenTask(task.id)));
+      }
     } catch {
       this.replace(task);
     }
+    // A repeating task's next occurrence is created at the end of its list.
+    if (next && this.listId() === listId && next.listId === listId) {
+      const created = next;
+      this.tasksResource.update((ts) => [...(ts ?? []).filter((t) => t.id !== created.id), created]);
+    }
     this.refreshCounts();
+    if (next) {
+      const created = next;
+      this.undo.show(`Completed "${task.title}"`, async () => {
+        await firstValueFrom(this.api.reopenTask(task.id));
+        await firstValueFrom(this.api.deleteTask(created.id));
+        this.afterUndo(listId);
+      });
+    }
   }
 
   protected startEdit(id: number): void {
