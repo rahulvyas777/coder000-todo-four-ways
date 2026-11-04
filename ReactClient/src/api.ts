@@ -61,4 +61,10 @@ export const api = {
     send<TaskList>('PATCH', `/api/lists/${id}`, changes),
   deleteList: (id: number) => send<void>('DELETE', `/api/lists/${id}`),
   tasks: (listId: number, signal?: AbortSignal) => request<TaskItem[]>(`/api/lists/${listId}/tasks`, { signal }),
+  createTask: (listId: number, title: string) => send<TaskItem>('POST', '/api/tasks', { listId, title }),
+  updateTask: (id: number, changes: Partial<Pick<TaskItem, 'title' | 'notes' | 'dueDate' | 'priority' | 'tags' | 'repeat' | 'listId'>>) =>
+    send<TaskItem>('PATCH', `/api/tasks/${id}`, changes),
+  completeTask: (id: number) => send<{ task: TaskItem; next: TaskItem | null }>('POST', `/api/tasks/${id}/complete`),
+  reopenTask: (id: number) => send<TaskItem>('POST', `/api/tasks/${id}/reopen`),
+  deleteTask: (id: number) => send<void>('DELETE', `/api/tasks/${id}`),
 }

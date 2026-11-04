@@ -22,8 +22,8 @@ export default function App() {
       <Sidebar lists={lists ?? []} setLists={setLists} />
       <Routes>
         <Route path="/" element={<Home lists={lists} error={error} />} />
-        <Route path="/lists/:listId" element={<ListView lists={lists ?? []} />} />
-        <Route path="/lists/:listId/tasks/:taskId" element={<ListView lists={lists ?? []} />} />
+        <Route path="/lists/:listId" element={<ListView lists={lists ?? []} setLists={setLists} />} />
+        <Route path="/lists/:listId/tasks/:taskId" element={<ListView lists={lists ?? []} setLists={setLists} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
@@ -160,6 +160,7 @@ function NameEditor(props: {
   initial: string
   placeholder?: string
   testId?: string
+  maxLength?: number
   onSave: (name: string) => void
   onCancel: () => void
 }) {
@@ -177,7 +178,7 @@ function NameEditor(props: {
     <input
       type="text"
       autoFocus
-      maxLength={80}
+      maxLength={props.maxLength ?? 80}
       defaultValue={props.initial}
       placeholder={props.placeholder}
       aria-label={props.label}
@@ -201,10 +202,50 @@ function Home({ lists, error }: { lists: TaskList[] | null; error: string | null
   )
 }
 
-function ListView({ lists }: { lists: TaskList[] }) {
+function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }) {
   const listId = Number(useParams().listId)
   const list = lists.find((l) => l.id === listId)
   const [loaded, setLoaded] = useState<{ listId: number; tasks: TaskItem[] } | null>(null)
+
+  function setTasks(fn: (tasks: TaskItem[]) => TaskItem[]) {
+    setLoaded((prev) => (prev?.listId === listId ? { listId, tasks: fn(prev.tasks) } : prev))
+  }
+
+  /** Keeps the sidebar counts in step with the changes made here, without refetching the lists. */
+  function adjustCounts(dTotal: number, dOpen: number) {
+    setLists(
+      (prev) =>
+        prev?.map((l) =>
+          l.id === listId ? { ...l, taskCount: l.taskCount + dTotal, openCount: l.openCount + dOpen } : l,
+        ) ?? null,
+    )
+  }
+
+  function replaceTask(task: TaskItem) {
+    setTasks((ts) => ts.map((t) => (t.id === task.id ? task : t)))
+  }
+
+  async function addTask(title: string) {
+    const created = await api.createTask(listId, title)
+    setTasks((ts) => [...ts, created])
+    adjustCounts(1, created.completed ? 0 : 1)
+  }
+
+  async function toggleTask(task: TaskItem) {
+    const updated = task.completed ? await api.reopenTask(task.id) : (await api.completeTask(task.id)).task
+    replaceTask(updated)
+    if (updated.completed !== task.completed) adjustCounts(0, updated.completed ? -1 : 1)
+  }
+
+  async function renameTask(task: TaskItem, title: string) {
+    replaceTask(await api.updateTask(task.id, { title }))
+  }
+
+  async function deleteTask(task: TaskItem) {
+    await api.deleteTask(task.id)
+    setTasks((ts) => ts.filter((t) => t.id !== task.id))
+    adjustCounts(-1, task.completed ? 0 : -1)
+  }
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -229,15 +270,51 @@ function ListView({ lists }: { lists: TaskList[] }) {
           {tasks ? `${open.toLocaleString()} of ${tasks.length.toLocaleString()} open` : ''}
         </span>
       </div>
+      <form
+        className="task-add"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const input = e.currentTarget.elements.namedItem('title') as HTMLInputElement
+          const title = input.value.trim()
+          input.value = ''
+          if (title) void addTask(title)
+        }}
+      >
+        <input
+          type="text"
+          name="title"
+          maxLength={200}
+          placeholder="Add a task"
+          aria-label="Add a task"
+          data-testid="task-add-input"
+          disabled={!tasks}
+        />
+      </form>
       <div className="rows-container" data-testid="rows-container">
-        {tasks?.map((t) => <TaskRow key={t.id} task={t} />)}
+        {tasks?.map((t) => (
+          <TaskRow
+            key={t.id}
+            task={t}
+            onToggle={() => void toggleTask(t)}
+            onRename={(title) => void renameTask(t, title)}
+            onDelete={() => void deleteTask(t)}
+          />
+        ))}
         {tasks?.length === 0 && <p className="empty-state">Nothing here</p>}
       </div>
     </main>
   )
 }
 
-function TaskRow({ task }: { task: TaskItem }) {
+function TaskRow(props: {
+  task: TaskItem
+  onToggle: () => void
+  onRename: (title: string) => void
+  onDelete: () => void
+}) {
+  const { task } = props
+  const [editing, setEditing] = useState(false)
+
   return (
     <div className={`task-row${task.completed ? ' completed' : ''}`} data-testid={`task-row-${task.id}`}>
       <input
@@ -245,12 +322,35 @@ function TaskRow({ task }: { task: TaskItem }) {
         className="task-check"
         data-testid={`task-check-${task.id}`}
         checked={task.completed}
-        readOnly
+        onChange={props.onToggle}
         aria-label={`Completed: ${task.title}`}
       />
-      <span className="task-title" data-testid={`task-title-${task.id}`}>
-        {task.title}
+      <span className="task-title" data-testid={`task-title-${task.id}`} onDoubleClick={() => setEditing(true)}>
+        {editing ? (
+          <NameEditor
+            label={`Edit title of ${task.title}`}
+            initial={task.title}
+            maxLength={200}
+            onSave={(title) => {
+              setEditing(false)
+              props.onRename(title)
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        ) : (
+          task.title
+        )}
       </span>
+      <button
+        type="button"
+        className="btn-icon btn-danger task-delete"
+        data-testid={`task-delete-${task.id}`}
+        aria-label={`Delete task ${task.title}`}
+        title="Delete"
+        onClick={props.onDelete}
+      >
+        <Icon name="i-trash" />
+      </button>
     </div>
   )
 }
