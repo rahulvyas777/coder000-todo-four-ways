@@ -9,6 +9,7 @@
     <div class="sidebar-head">
         <h1 class="app-title" data-testid="app-title">Tasks</h1>
         <div class="sidebar-tools">
+            <ThemeToggle />
             <button type="button" class="btn-icon" data-testid="list-add" aria-label="Add list"
                     aria-expanded="@(_adding ? "true" : "false")" @onclick="StartAdd">
                 <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
