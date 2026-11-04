@@ -79,4 +79,24 @@ public sealed class ApiClient(HttpClient http)
         var response = await http.DeleteAsync($"api/tasks/{id}");
         response.EnsureSuccessStatusCode();
     }
+
+    public async Task<Subtask> CreateSubtaskAsync(int taskId, string title)
+    {
+        var response = await http.PostAsJsonAsync($"api/tasks/{taskId}/subtasks", new { title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task<Subtask> SetSubtaskDoneAsync(int id, bool done)
+    {
+        var response = await http.PatchAsJsonAsync($"api/subtasks/{id}", new { done });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task DeleteSubtaskAsync(int id)
+    {
+        var response = await http.DeleteAsync($"api/subtasks/{id}");
+        response.EnsureSuccessStatusCode();
+    }
 }

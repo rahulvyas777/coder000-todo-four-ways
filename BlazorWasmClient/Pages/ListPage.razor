@@ -103,6 +103,12 @@
                           @ondblclick="() => StartEdit(task)">@task.Title</span>
                 }
                 <span class="task-meta">
+                    @if (task.Subtasks.Count > 0)
+                    {
+                        var done = task.Subtasks.Count(s => s.Done);
+                        <span class="subtask-progress" data-testid="subtask-progress-@task.Id"
+                              aria-label="@($"{done} of {task.Subtasks.Count} subtasks done")">@done/@task.Subtasks.Count</span>
+                    }
                     @foreach (var tag in task.Tags)
                     {
                         <span class="tag" data-testid="task-tag-@task.Id-@tag">@tag</span>
@@ -182,6 +188,25 @@
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
             </select>
+
+            <label for="subtask-add-input">Subtasks</label>
+            <ul class="subtasks">
+                @foreach (var sub in pt.Subtasks)
+                {
+                    <li class="subtask-row@(sub.Done ? " done" : "")" data-testid="subtask-row-@sub.Id" @key="sub.Id">
+                        <input type="checkbox" data-testid="subtask-check-@sub.Id" checked="@sub.Done"
+                               aria-label="@($"Done: {sub.Title}")" @onchange="() => ToggleSubtask(pt, sub)" />
+                        <span class="subtask-title">@sub.Title</span>
+                        <button type="button" class="btn-icon btn-danger" data-testid="subtask-delete-@sub.Id"
+                                aria-label="@($"Delete subtask {sub.Title}")" @onclick="() => DeleteSubtask(pt, sub)">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                        </button>
+                    </li>
+                }
+            </ul>
+            <input id="subtask-add-input" type="text" class="subtask-add" data-testid="subtask-add-input"
+                   placeholder="Add a subtask" maxlength="200"
+                   @bind="_pSubtask" @bind:event="oninput" @onkeydown="e => OnSubtaskKey(e, pt)" />
         </aside>
     </SectionContent>
 }
@@ -490,6 +515,7 @@
         _pTitle = task?.Title ?? "";
         _pNotes = task?.Notes ?? "";
         _pTag = "";
+        _pSubtask = "";
     }
 
     // The query (filter, search, sort in later steps) is kept when the panel opens or closes.
@@ -573,6 +599,36 @@
 
     private Task RemoveTag(TaskItem task, string tag) =>
         SaveTags(task, task.Tags.Where(t => t != tag).ToList());
+
+    // ---- Subtasks (the task's own completed state is never touched here) ----
+
+    private string _pSubtask = "";
+
+    private async Task OnSubtaskKey(KeyboardEventArgs e, TaskItem task)
+    {
+        if (e.Key != "Enter") return;
+        var title = _pSubtask.Trim();
+        _pSubtask = "";
+        if (title.Length == 0) return;
+        await Run(async () => task.Subtasks.Add(await Api.CreateSubtaskAsync(task.Id, title)));
+    }
+
+    private async Task ToggleSubtask(TaskItem task, Subtask sub)
+    {
+        sub.Done = !sub.Done;
+        await Run(async () =>
+        {
+            var updated = await Api.SetSubtaskDoneAsync(sub.Id, sub.Done);
+            var i = task.Subtasks.FindIndex(s => s.Id == updated.Id);
+            if (i >= 0) task.Subtasks[i] = updated;
+        });
+    }
+
+    private async Task DeleteSubtask(TaskItem task, Subtask sub)
+    {
+        task.Subtasks.Remove(sub);
+        await Run(() => Api.DeleteSubtaskAsync(sub.Id));
+    }
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
 
