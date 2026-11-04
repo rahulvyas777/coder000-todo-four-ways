@@ -75,7 +75,17 @@
         @foreach (var task in VisibleTasks())
         {
             <div class="@RowClass(task)" role="listitem"
-                 data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)">
+                 data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)"
+                 @ondragover:preventDefault="true" @ondrop="() => DropOn(task)" @ondrop:preventDefault="true">
+                @if (Sort == "manual")
+                {
+                    <button type="button" class="drag-handle" data-testid="drag-handle-@task.Id" draggable="true"
+                            aria-label="@($"Drag to reorder {task.Title}")" title="Drag to reorder"
+                            @ondragstart="() => _draggingId = task.Id" @ondragend="() => _draggingId = null"
+                            @onclick:stopPropagation="true">
+                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
+                    </button>
+                }
                 <input type="checkbox" class="task-check" data-testid="task-check-@task.Id"
                        checked="@task.Completed" aria-label="@($"Completed: {task.Title}")"
                        @onchange="() => ToggleTask(task)" @onclick:stopPropagation="true" />
@@ -434,7 +444,32 @@
         if (task.Completed) css += " completed";
         if (IsOverdue(task)) css += " overdue";
         if (task.Id == TaskId) css += " open";
+        if (task.Id == _draggingId) css += " dragging";
         return css;
+    }
+
+    // ---- Drag-and-drop reorder (native HTML5 drag and drop, manual sort only) ----
+
+    private int? _draggingId;
+
+    /// <summary>
+    /// Moves the dragged task to the target's place in the whole list (so it lands before the
+    /// target when moving up and after it when moving down), then saves the full order.
+    /// </summary>
+    private async Task DropOn(TaskItem target)
+    {
+        var draggedId = _draggingId;
+        _draggingId = null;
+        if (_tasks is null || draggedId is null || draggedId == target.Id || Sort != "manual") return;
+        var from = _tasks.FindIndex(t => t.Id == draggedId);
+        var to = _tasks.IndexOf(target);
+        if (from < 0 || to < 0) return;
+        var dragged = _tasks[from];
+        _tasks.RemoveAt(from);
+        _tasks.Insert(to, dragged);
+        var listId = ListId;
+        var orderedIds = _tasks.Select(t => t.Id).ToList();
+        await Run(() => Api.ReorderTasksAsync(listId, orderedIds));
     }
 
     private static bool IsOverdue(TaskItem task) =>

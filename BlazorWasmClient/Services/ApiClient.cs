@@ -67,6 +67,13 @@ public sealed class ApiClient(HttpClient http)
         return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
     }
 
+    /// <summary>Sets the positions of the list's tasks to the order of <paramref name="orderedIds"/>.</summary>
+    public async Task ReorderTasksAsync(int listId, IReadOnlyList<int> orderedIds)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks/reorder", new { listId, orderedIds });
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task DeleteTaskAsync(int id)
     {
         var response = await http.DeleteAsync($"api/tasks/{id}");
