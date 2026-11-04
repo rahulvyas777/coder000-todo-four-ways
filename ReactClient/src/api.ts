@@ -80,6 +80,9 @@ export const api = {
   deleteSubtask: (id: number) => send<void>('DELETE', `/api/subtasks/${id}`),
   bulk: (ids: number[], action: BulkAction, targetListId?: number) =>
     send<{ affected: number }>('POST', '/api/tasks/bulk', { ids, action, targetListId }),
+  /** The export endpoint answers with Content-Disposition: attachment, so a link to it downloads. */
+  exportUrl: (listId: number, format: 'json' | 'csv') => `${API_URL}/api/lists/${listId}/export?format=${format}`,
+  importList: (data: unknown) => send<TaskList>('POST', '/api/lists/import', data),
 }
 
 export type BulkAction = 'complete' | 'reopen' | 'delete' | 'restore' | 'move'

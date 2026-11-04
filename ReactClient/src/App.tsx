@@ -404,6 +404,18 @@ function ListView({
     setTasks((ts) => ts.map((t) => (t.id === task.id ? task : t)))
   }
 
+  async function importList(file: File) {
+    let created: TaskList
+    try {
+      created = await api.importList(JSON.parse(await file.text()))
+    } catch (e) {
+      window.alert(`Could not import "${file.name}": ${e instanceof Error ? e.message : String(e)}`)
+      return
+    }
+    setLists((prev) => [...(prev ?? []).filter((l) => l.id !== created.id), created])
+    navigate(`/lists/${created.id}`)
+  }
+
   async function addTask(title: string) {
     const created = await api.createTask(listId, title)
     setTasks((ts) => [...ts, created])
@@ -682,6 +694,31 @@ function ListView({
         <span className="task-count" data-testid="task-count" aria-live="polite">
           {tasks ? `${open.toLocaleString()} of ${tasks.length.toLocaleString()} open` : ''}
         </span>
+        <div className="io-tools">
+          <a className="btn" href={api.exportUrl(listId, 'json')} download data-testid="export-json" title="Export as JSON">
+            <Icon name="i-export" />
+            JSON
+          </a>
+          <a className="btn" href={api.exportUrl(listId, 'csv')} download data-testid="export-csv" title="Export as CSV">
+            <Icon name="i-export" />
+            CSV
+          </a>
+          <label className="btn" title="Import a list from a JSON file">
+            <Icon name="i-import" />
+            Import
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="visually-hidden"
+              data-testid="import-input"
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0]
+                e.currentTarget.value = ''
+                if (file) void importList(file)
+              }}
+            />
+          </label>
+        </div>
       </div>
       <form
         className="task-add"
