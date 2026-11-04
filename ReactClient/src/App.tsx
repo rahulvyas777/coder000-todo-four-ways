@@ -569,6 +569,36 @@ function ListView({
       )
     : null
 
+  // Hand-rolled virtualization: rows are a fixed ROW_H tall, so only the rows inside the scrolled
+  // window of rows-container (plus a few either side) are rendered, absolutely placed in a spacer.
+  const rowsRef = useRef<HTMLDivElement>(null)
+  const [scrolled, setScrolled] = useState({ listId, top: 0 })
+  const [viewHeight, setViewHeight] = useState(800)
+  useEffect(() => {
+    const el = rowsRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => setViewHeight(el.clientHeight))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  // Tagged with its list like the selection: a newly opened list starts at its top.
+  const scrollTop = scrolled.listId === listId ? scrolled.top : 0
+  useEffect(() => {
+    if (rowsRef.current) rowsRef.current.scrollTop = 0
+  }, [listId])
+  const rowCount = visible?.length ?? 0
+  const first = Math.min(Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN), rowCount)
+  const last = Math.min(rowCount, Math.ceil((scrollTop + viewHeight) / ROW_H) + OVERSCAN)
+
+  /** Scrolls the container just enough to show row `index`, rendered or not (the j/k cursor). */
+  function scrollRowIntoView(index: number) {
+    const el = rowsRef.current
+    if (!el) return
+    const top = index * ROW_H
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight
+  }
+
   function setParam(name: string, value: string | null, replace = false) {
     const p = new URLSearchParams(search)
     if (value === null) p.delete(name)
@@ -634,7 +664,7 @@ function ListView({
         const step = e.key === 'j' ? 1 : -1
         const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.min(Math.max(at + step, 0), rows.length - 1)
         setCursor({ listId, id: rows[next].id })
-        document.querySelector(`[data-testid="task-row-${rows[next].id}"]`)?.scrollIntoView({ block: 'nearest' })
+        scrollRowIntoView(next)
         break
       }
       case 'x':
@@ -841,10 +871,17 @@ function ListView({
           </button>
         </div>
       )}
-      <div className="rows-container" data-testid="rows-container">
-        {visible?.map((t) => (
+      <div
+        className="rows-container"
+        data-testid="rows-container"
+        ref={rowsRef}
+        onScroll={(e) => setScrolled({ listId, top: e.currentTarget.scrollTop })}
+      >
+        <div className="rows-spacer" style={{ height: (visible?.length ?? 0) * ROW_H }}>
+        {visible?.slice(first, last).map((t, i) => (
           <TaskRow
             key={t.id}
+            top={(first + i) * ROW_H}
             task={t}
             isOpen={t.id === openId}
             highlighted={t.id === highlightId}
@@ -870,6 +907,7 @@ function ListView({
             onDelete={() => void deleteTask(t)}
           />
         ))}
+        </div>
         {visible?.length === 0 && <p className="empty-state">Nothing here</p>}
       </div>
     </main>
@@ -889,6 +927,11 @@ function ListView({
 }
 
 const NO_IDS: ReadonlySet<number> = new Set()
+
+/** Row height in px, fixed by --row-h in the shared stylesheet. */
+const ROW_H = 40
+/** Rows rendered above and below the visible window. */
+const OVERSCAN = 10
 
 type DropWhere = 'before' | 'after'
 type DropAt = { id: number; where: DropWhere }
@@ -911,6 +954,7 @@ function dropWhere(e: DragEvent<HTMLElement>): DropWhere {
 
 function TaskRow(props: {
   task: TaskItem
+  top: number
   isOpen: boolean
   highlighted: boolean
   selected: boolean
@@ -928,6 +972,7 @@ function TaskRow(props: {
     <div
       className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${props.highlighted ? ' highlighted' : ''}${props.selected ? ' selected' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
       data-testid={`task-row-${task.id}`}
+      style={{ top: props.top }}
       onClick={(e) => {
         // Clicks on the row's own controls (checkbox, delete, title editor) do not open the panel.
         if (!(e.target as HTMLElement).closest('input, button, select, textarea, .drag-handle')) props.onOpen()
