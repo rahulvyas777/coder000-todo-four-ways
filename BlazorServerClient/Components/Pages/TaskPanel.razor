@@ -58,6 +58,26 @@
             }
         </select>
     </div>
+
+    <div class="field">
+        <label for="subtask-add">Subtasks</label>
+        <ul class="subtasks">
+            @foreach (var s in Task.Subtasks.OrderBy(s => s.Position).ThenBy(s => s.Id))
+            {
+                <li class="subtask-row @(s.Done ? "done" : null)" data-testid="subtask-row-@s.Id" @key="s.Id">
+                    <input type="checkbox" data-testid="subtask-check-@s.Id" aria-label="Done: @s.Title"
+                           checked="@s.Done" @onchange="() => ToggleSubtask(s)" />
+                    <span class="subtask-title">@s.Title</span>
+                    <button type="button" class="btn-icon btn-danger" data-testid="subtask-delete-@s.Id"
+                            aria-label="Delete subtask @s.Title" @onclick="() => DeleteSubtask(s)">
+                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                    </button>
+                </li>
+            }
+        </ul>
+        <input id="subtask-add" type="text" class="subtask-add" data-testid="subtask-add-input" maxlength="200"
+               placeholder="Add a subtask" @bind="subtaskText" @bind:event="oninput" @onkeydown="OnSubtaskKey" />
+    </div>
 </aside>
 
 @code {
@@ -146,4 +166,37 @@
     }
 
     private Task RemoveTag(string tag) => SaveTags(Task.Tags.Where(t => t != tag).ToList());
+
+    // Subtasks have their own endpoints; the task's subtask list is updated with each response
+    // and handed back through OnSaved so the row's progress follows. A subtask never completes
+    // or reopens its task.
+    private string subtaskText = "";
+
+    private async Task OnSubtaskKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        var title = subtaskText.Trim();
+        subtaskText = "";
+        if (title.Length == 0) return;
+        var created = await Api.AddSubtaskAsync(Task.Id, title);
+        Task.Subtasks.Add(created);
+        await OnSaved.InvokeAsync(Task);
+    }
+
+    private async Task ToggleSubtask(Subtask s)
+    {
+        s.Done = !s.Done;
+        var updated = await Api.SetSubtaskDoneAsync(s.Id, s.Done);
+        // Task may have been replaced by a newer server copy while the request ran.
+        var i = Task.Subtasks.FindIndex(x => x.Id == updated.Id);
+        if (i >= 0) Task.Subtasks[i] = updated;
+        await OnSaved.InvokeAsync(Task);
+    }
+
+    private async Task DeleteSubtask(Subtask s)
+    {
+        await Api.DeleteSubtaskAsync(s.Id);
+        Task.Subtasks.RemoveAll(x => x.Id == s.Id);
+        await OnSaved.InvokeAsync(Task);
+    }
 }

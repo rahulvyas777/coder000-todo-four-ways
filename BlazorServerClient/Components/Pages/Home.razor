@@ -141,6 +141,14 @@
                                 {
                                     <span class="tag" data-testid="task-tag-@t.Id-@tag">@tag</span>
                                 }
+                                @if (t.Subtasks.Count > 0)
+                                {
+                                    var done = t.Subtasks.Count(s => s.Done);
+                                    <span class="subtask-progress" data-testid="subtask-progress-@t.Id"
+                                          aria-label="@done of @t.Subtasks.Count subtasks done">
+                                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-check" /></svg>@done/@t.Subtasks.Count
+                                    </span>
+                                }
                                 @if (t.DueDate is { } due)
                                 {
                                     <time class="task-due" data-testid="task-due-@t.Id" datetime="@due.ToString("yyyy-MM-dd")">@FormatDue(due)</time>

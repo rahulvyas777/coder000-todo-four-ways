@@ -126,6 +126,26 @@ public sealed class TasksApi(HttpClient http)
         using var res = await http.PostAsJsonAsync("api/tasks/reorder", new { listId, orderedIds });
         res.EnsureSuccessStatusCode();
     }
+
+    public async Task<Subtask> AddSubtaskAsync(int taskId, string title)
+    {
+        using var res = await http.PostAsJsonAsync($"api/tasks/{taskId}/subtasks", new { title });
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task<Subtask> SetSubtaskDoneAsync(int id, bool done)
+    {
+        using var res = await http.PatchAsJsonAsync($"api/subtasks/{id}", new { done });
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task DeleteSubtaskAsync(int id)
+    {
+        using var res = await http.DeleteAsync($"api/subtasks/{id}");
+        res.EnsureSuccessStatusCode();
+    }
 }
 
 public sealed class CompleteResult
