@@ -209,6 +209,13 @@
                                         <svg class="icon" aria-hidden="true"><use href="icons.svg#i-check" /></svg>@done/@t.Subtasks.Count
                                     </span>
                                 }
+                                @if (t.Repeat is "daily" or "weekly" or "monthly")
+                                {
+                                    <span class="task-repeat" data-testid="task-repeat-@t.Id" role="img"
+                                          aria-label="Repeats @t.Repeat" title="Repeats @t.Repeat">
+                                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-repeat" /></svg>
+                                    </span>
+                                }
                                 @if (t.DueDate is { } due)
                                 {
                                     <time class="task-due" data-testid="task-due-@t.Id" datetime="@due.ToString("yyyy-MM-dd")">@FormatDue(due)</time>
@@ -428,13 +435,29 @@
         lists = await Api.GetListsAsync();
     }
 
+    // Completing a repeating task makes the API create the next occurrence; it joins the list at
+    // once, and the undo toast reopens the original and deletes that next task.
     private async Task ToggleTask(TaskItem t)
     {
-        var updated = t.Completed
-            ? await Api.ReopenTaskAsync(t.Id)
-            : (await Api.CompleteTaskAsync(t.Id)).Task;
-        ReplaceTask(updated);
+        if (t.Completed)
+        {
+            ReplaceTask(await Api.ReopenTaskAsync(t.Id));
+            lists = await Api.GetListsAsync();
+            return;
+        }
+        var listId = t.ListId;
+        var result = await Api.CompleteTaskAsync(t.Id);
+        ReplaceTask(result.Task);
+        if (result.Next is { } next && loadedListId == next.ListId && !tasks.Any(x => x.Id == next.Id))
+            tasks.Add(next);
         lists = await Api.GetListsAsync();
+        if (result.Next is { } created)
+            ShowToast($"Completed \"{t.Title}\"", async () =>
+            {
+                await Api.DeleteTaskAsync(created.Id);
+                await Api.ReopenTaskAsync(t.Id);
+                await ReloadTasks(listId);
+            });
     }
 
     private void StartEditTask(TaskItem t)
