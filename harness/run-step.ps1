@@ -155,7 +155,10 @@ try {
         $verdict = (& node (Join-Path $ctx.harness 'runner-helper.js') verdict $verdictJson | Out-String | ConvertFrom-Json)
         Write-Host ("verdict: pass={0} expected={1} unexpected={2} flaky={3} skipped={4}" -f $verdict.ok, $verdict.expected, $verdict.unexpected, $verdict.flaky, $verdict.skipped)
 
-        $budgetHit = ("" + $parsed.result_subtype + ' ' + $parsed.terminal_reason + ' ' + $parsed.result_text) -match 'budget'
+        # subtype/terminal_reason, or an explicit stop message in the text; a session that merely wrote the
+        # word "budget" in its summary (angular step 14: "against a 15 s budget") is not a budget stop.
+        $budgetHit = (("" + $parsed.result_subtype + ' ' + $parsed.terminal_reason) -match 'budget') -or
+            (("" + $parsed.result_text) -match 'max.budget|budget.{0,40}(exceed|reached|limit)|(exceed|reached).{0,40}budget')
         if ($timedOut) { $result = 'timeout' }
         elseif ($budgetHit) { $result = 'budget' }
         elseif ($verdict.ok) { $result = 'pass' }
