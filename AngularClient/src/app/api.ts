@@ -85,4 +85,8 @@ export class Api {
   deleteTask(id: number): Observable<void> {
     return this.http.delete<void>(`${API_URL}/api/tasks/${id}`);
   }
+
+  reorderTasks(listId: number, orderedIds: number[]): Observable<void> {
+    return this.http.post<void>(`${API_URL}/api/tasks/reorder`, { listId, orderedIds });
+  }
 }

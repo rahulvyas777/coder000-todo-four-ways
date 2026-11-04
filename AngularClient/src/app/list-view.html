@@ -63,8 +63,27 @@
         [class.overdue]="isOverdue(task)"
         [class.open]="openTaskId() === task.id"
         [attr.data-testid]="'task-row-' + task.id"
+        [class.dragging]="draggingId() === task.id"
+        [class.drop-before]="dropTarget()?.id === task.id && !dropTarget()?.after"
+        [class.drop-after]="dropTarget()?.id === task.id && dropTarget()?.after"
         (click)="openRow(task, $event)"
+        (dragover)="onDragOver(task, $event)"
+        (drop)="onDrop($event)"
       >
+        @if (sort() === 'manual') {
+          <button
+            type="button"
+            class="drag-handle"
+            draggable="true"
+            [attr.data-testid]="'drag-handle-' + task.id"
+            [attr.aria-label]="'Drag to reorder ' + task.title"
+            title="Drag to reorder"
+            (dragstart)="onDragStart(task, $event)"
+            (dragend)="onDragEnd()"
+          >
+            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
+          </button>
+        }
         <input
           #check
           type="checkbox"

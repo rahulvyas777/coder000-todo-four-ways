@@ -262,6 +262,69 @@ export class ListView {
     this.refreshCounts();
   }
 
+  /** The task being dragged by its handle (manual sort only; native HTML5 drag and drop). */
+  protected readonly draggingId = signal<number | null>(null);
+
+  /** The row under the pointer and which half of it: the drop goes before or after it. */
+  protected readonly dropTarget = signal<{ id: number; after: boolean } | null>(null);
+
+  protected onDragStart(task: TaskItem, event: DragEvent): void {
+    this.draggingId.set(task.id);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      // Some browsers only start a drag when data is set.
+      event.dataTransfer.setData('text/plain', String(task.id));
+      const row = (event.target as HTMLElement).closest('.task-row');
+      if (row) event.dataTransfer.setDragImage(row, 16, 20);
+    }
+  }
+
+  protected onDragOver(task: TaskItem, event: DragEvent): void {
+    const dragged = this.draggingId();
+    if (dragged === null) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    if (dragged === task.id) {
+      this.dropTarget.set(null);
+      return;
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    const current = this.dropTarget();
+    if (current?.id !== task.id || current.after !== after) this.dropTarget.set({ id: task.id, after });
+  }
+
+  protected onDragEnd(): void {
+    this.draggingId.set(null);
+    this.dropTarget.set(null);
+  }
+
+  protected async onDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    const dragged = this.draggingId();
+    const target = this.dropTarget();
+    this.onDragEnd();
+    if (dragged === null || !target || target.id === dragged) return;
+
+    // The visible rows may be filtered, so the move is applied to the whole list's order.
+    const before = this.tasks();
+    const moved = before.find((t) => t.id === dragged);
+    if (!moved) return;
+    const rest = before.filter((t) => t.id !== dragged);
+    const index = rest.findIndex((t) => t.id === target.id);
+    if (index < 0) return;
+    rest.splice(target.after ? index + 1 : index, 0, moved);
+    const reordered = rest.map((t, i) => ({ ...t, position: i + 1 }));
+
+    const listId = this.listId();
+    this.tasksResource.set(reordered);
+    try {
+      await firstValueFrom(this.api.reorderTasks(listId, reordered.map((t) => t.id)));
+    } catch {
+      if (this.listId() === listId) this.tasksResource.set(before);
+    }
+  }
+
   /** A click anywhere on a row (but not on its controls) opens the panel. */
   protected openRow(task: TaskItem, event: MouseEvent): void {
     if ((event.target as HTMLElement).closest('input, button, select, textarea')) return;
