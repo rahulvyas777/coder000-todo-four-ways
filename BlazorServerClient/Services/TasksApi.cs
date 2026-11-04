@@ -77,6 +77,13 @@ public sealed class TasksApi(HttpClient http)
         res.EnsureSuccessStatusCode();
     }
 
+    public async Task<TaskList> RestoreListAsync(int id)
+    {
+        using var res = await http.PostAsync($"api/lists/{id}/restore", null);
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
     public async Task<TaskItem> CreateTaskAsync(int listId, string title)
     {
         using var res = await http.PostAsJsonAsync("api/tasks", new { listId, title });
@@ -118,6 +125,13 @@ public sealed class TasksApi(HttpClient http)
     {
         using var res = await http.DeleteAsync($"api/tasks/{id}");
         res.EnsureSuccessStatusCode();
+    }
+
+    public async Task<TaskItem> RestoreTaskAsync(int id)
+    {
+        using var res = await http.PostAsync($"api/tasks/{id}/restore", null);
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskItem>())!;
     }
 
     /// <summary>Sets the list's manual order: positions follow the order of the ids.</summary>

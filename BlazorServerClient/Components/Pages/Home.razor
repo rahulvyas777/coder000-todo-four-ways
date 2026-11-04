@@ -207,6 +207,14 @@
     {
         <TaskPanel @key="open.Id" Task="open" OnSaved="ReplaceTask" OnClose="ClosePanel" />
     }
+
+    @if (toast is { } current)
+    {
+        <div class="toast" data-testid="toast" role="status" @key="current">
+            <span>@current.Message</span>
+            <button type="button" data-testid="toast-undo" @onclick="() => UndoToast(current)">Undo</button>
+        </div>
+    }
 </div>
 
 @code {
@@ -371,6 +379,52 @@
         await Api.DeleteTaskAsync(t.Id);
         tasks.RemoveAll(x => x.Id == t.Id);
         lists = await Api.GetListsAsync();
+        ShowToast($"Deleted \"{t.Title}\"", async () =>
+        {
+            await Api.RestoreTaskAsync(t.Id);
+            await ReloadTasks(t.ListId);
+        });
+    }
+
+    // Undo toast: one at a time (a new action replaces it), hidden after five seconds.
+    private sealed record Toast(string Message, Func<Task> Undo);
+
+    private Toast? toast;
+    private CancellationTokenSource? toastTimer;
+
+    private void ShowToast(string message, Func<Task> undo)
+    {
+        toastTimer?.Cancel();
+        var shown = new Toast(message, undo);
+        toast = shown;
+        var cts = toastTimer = new CancellationTokenSource();
+        _ = HideToastLater(shown, cts.Token);
+    }
+
+    private async Task HideToastLater(Toast shown, CancellationToken token)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(5), token); }
+        catch (OperationCanceledException) { return; }
+        await InvokeAsync(() =>
+        {
+            if (toast != shown) return;
+            toast = null;
+            StateHasChanged();
+        });
+    }
+
+    private async Task UndoToast(Toast shown)
+    {
+        if (toast != shown) return;
+        toastTimer?.Cancel();
+        toast = null;
+        await shown.Undo();
+    }
+
+    private async Task ReloadTasks(int listId)
+    {
+        if (loadedListId == listId && await Api.GetTasksAsync(listId) is { } reloaded) tasks = reloaded;
+        lists = await Api.GetListsAsync();
     }
 
     // Detail panel: the open task is the one in the route.
@@ -495,11 +549,23 @@
         if (selected.Count == 0 || ListId is null) return;
         var listId = ListId.Value;
         var ids = selected.ToList();
+        // Only the tasks this action changes are reverted by its undo.
+        var wereOpen = tasks.Where(t => ids.Contains(t.Id) && !t.Completed).Select(t => t.Id).ToList();
         selected.Clear();
         await Api.BulkAsync(ids, action, targetListId);
-        var reloaded = await Api.GetTasksAsync(listId);
-        if (loadedListId == listId && reloaded is not null) tasks = reloaded;
-        lists = await Api.GetListsAsync();
+        await ReloadTasks(listId);
+        if (action == "delete")
+            ShowToast($"Deleted {ids.Count} {(ids.Count == 1 ? "task" : "tasks")}", async () =>
+            {
+                await Api.BulkAsync(ids, "restore");
+                await ReloadTasks(listId);
+            });
+        else if (action == "complete" && wereOpen.Count > 0)
+            ShowToast($"Completed {wereOpen.Count} {(wereOpen.Count == 1 ? "task" : "tasks")}", async () =>
+            {
+                await Api.BulkAsync(wereOpen, "reopen");
+                await ReloadTasks(listId);
+            });
     }
 
     private string? RowClass(TaskItem t)
@@ -541,6 +607,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        toastTimer?.Cancel();
         if (selfRef is null) return;
         try { await JS.InvokeVoidAsync("taskReorder.unregister", selfRef); }
         catch (JSDisconnectedException) { }
@@ -557,5 +624,11 @@
             loadedListId = null;
             Nav.NavigateTo(lists.Count > 0 ? $"lists/{lists[0].Id}" : "", replace: true);
         }
+        ShowToast($"Deleted list \"{l.Name}\"", async () =>
+        {
+            await Api.RestoreListAsync(l.Id);
+            lists = await Api.GetListsAsync();
+            Nav.NavigateTo($"lists/{l.Id}");
+        });
     }
 }
