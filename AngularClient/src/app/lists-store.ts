@@ -21,4 +21,21 @@ export class ListsStore {
     this.lists.set(lists);
     return lists;
   }
+
+  async create(name: string): Promise<TaskList> {
+    const list = await firstValueFrom(this.api.createList(name));
+    this.lists.update((ls) => [...ls, list]);
+    return list;
+  }
+
+  async rename(id: number, name: string): Promise<void> {
+    const updated = await firstValueFrom(this.api.updateList(id, { name }));
+    // Keep the counts we have if the PATCH response leaves them out.
+    this.lists.update((ls) => ls.map((l) => (l.id === id ? { ...l, ...updated } : l)));
+  }
+
+  async remove(id: number): Promise<void> {
+    await firstValueFrom(this.api.deleteList(id));
+    this.lists.update((ls) => ls.filter((l) => l.id !== id));
+  }
 }

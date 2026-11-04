@@ -2,6 +2,19 @@
   <aside class="sidebar">
     <div class="sidebar-head">
       <h1 class="app-title" data-testid="app-title">Tasks</h1>
+      <div class="sidebar-tools">
+        <button
+          type="button"
+          class="btn-icon"
+          data-testid="list-add"
+          aria-label="Add list"
+          title="Add list"
+          [attr.aria-expanded]="adding()"
+          (click)="startAdd()"
+        >
+          <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
+        </button>
+      </div>
     </div>
     <nav aria-label="Lists">
       <ul class="list-nav" data-testid="list-nav">
@@ -9,17 +22,69 @@
           <li
             class="list-item"
             [attr.data-testid]="'list-item-' + list.id"
-            routerLinkActive="active"
-            #rla="routerLinkActive"
+            [class.active]="activeListId() === list.id"
           >
-            <a [routerLink]="['/lists', list.id]" [attr.aria-current]="rla.isActive ? 'page' : null">
-              <span>{{ list.name }}</span>
-              <span class="list-count" [attr.data-testid]="'list-count-' + list.id">{{ list.openCount }}</span>
-            </a>
+            @if (editingId() === list.id) {
+              <input
+                type="text"
+                appAutofocus
+                maxlength="80"
+                [attr.aria-label]="'Rename list ' + list.name"
+                [value]="list.name"
+                (keydown.enter)="commitRename(list.id, $any($event.target).value)"
+                (keydown.escape)="cancelRename()"
+                (blur)="commitRename(list.id, $any($event.target).value)"
+              />
+            } @else {
+              <a
+                [routerLink]="['/lists', list.id]"
+                [attr.aria-current]="activeListId() === list.id ? 'page' : null"
+                (dblclick)="startRename(list.id)"
+              >
+                <span>{{ list.name }}</span>
+                <span class="list-count" [attr.data-testid]="'list-count-' + list.id">{{ list.openCount }}</span>
+              </a>
+              <span class="list-actions">
+                <button
+                  type="button"
+                  class="btn-icon"
+                  [attr.data-testid]="'list-rename-' + list.id"
+                  [attr.aria-label]="'Rename list ' + list.name"
+                  title="Rename"
+                  (click)="startRename(list.id)"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="icons.svg#i-edit" /></svg>
+                </button>
+                <button
+                  type="button"
+                  class="btn-icon btn-danger"
+                  [attr.data-testid]="'list-delete-' + list.id"
+                  [attr.aria-label]="'Delete list ' + list.name"
+                  title="Delete"
+                  (click)="deleteList(list.id, list.name)"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                </button>
+              </span>
+            }
           </li>
         }
       </ul>
     </nav>
+    @if (adding()) {
+      <div class="list-add-row">
+        <input
+          type="text"
+          appAutofocus
+          data-testid="list-name-input"
+          aria-label="New list name"
+          placeholder="New list"
+          maxlength="80"
+          (keydown.enter)="commitAdd($any($event.target))"
+          (keydown.escape)="adding.set(false)"
+        />
+      </div>
+    }
   </aside>
   <router-outlet />
 </div>

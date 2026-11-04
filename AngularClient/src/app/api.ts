@@ -50,6 +50,18 @@ export class Api {
     return this.http.get<TaskList[]>(`${API_URL}/api/lists`);
   }
 
+  createList(name: string): Observable<TaskList> {
+    return this.http.post<TaskList>(`${API_URL}/api/lists`, { name });
+  }
+
+  updateList(id: number, changes: { name?: string; position?: number }): Observable<TaskList> {
+    return this.http.patch<TaskList>(`${API_URL}/api/lists/${id}`, changes);
+  }
+
+  deleteList(id: number): Observable<void> {
+    return this.http.delete<void>(`${API_URL}/api/lists/${id}`);
+  }
+
   tasks(listId: number): Observable<TaskItem[]> {
     return this.http.get<TaskItem[]>(`${API_URL}/api/lists/${listId}/tasks`);
   }
