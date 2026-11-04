@@ -115,4 +115,13 @@ export class Api {
   deleteSubtask(id: number): Observable<void> {
     return this.http.delete<void>(`${API_URL}/api/subtasks/${id}`);
   }
+
+  exportList(id: number, format: 'json' | 'csv'): Observable<Blob> {
+    return this.http.get(`${API_URL}/api/lists/${id}/export`, { params: { format }, responseType: 'blob' });
+  }
+
+  /** Takes the parsed JSON file as is; the API validates its shape. */
+  importList(payload: unknown): Observable<TaskList> {
+    return this.http.post<TaskList>(`${API_URL}/api/lists/import`, payload);
+  }
 }

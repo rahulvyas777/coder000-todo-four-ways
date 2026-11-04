@@ -1,7 +1,8 @@
 import { ApplicationRef, Component, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
-import { filter, map } from 'rxjs';
+import { filter, firstValueFrom, map } from 'rxjs';
+import { Api } from './api';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
 import { ThemeService } from './theme';
@@ -18,6 +19,7 @@ export class App {
   private readonly appRef = inject(ApplicationRef);
   protected readonly undo = inject(UndoService);
   protected readonly themes = inject(ThemeService);
+  private readonly api = inject(Api);
 
   /** The list in the URL; it is highlighted in the sidebar and survives a reload. */
   protected readonly activeListId = toSignal(
@@ -77,6 +79,37 @@ export class App {
     const current = this.store.lists().find((l) => l.id === id);
     if (!name || name === current?.name) return;
     await this.store.rename(id, name);
+  }
+
+  /** Fetches the API's export file and saves it as `<list>.json` or `<list>.csv`. */
+  protected async exportList(format: 'json' | 'csv'): Promise<void> {
+    const id = this.activeListId();
+    const list = this.store.lists().find((l) => l.id === id);
+    if (!list) return;
+    const blob = await firstValueFrom(this.api.exportList(list.id, format));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${list.name}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  protected async importList(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch {
+      alert(`"${file.name}" is not a valid JSON file.`);
+      return;
+    }
+    const list = await this.store.import(payload);
+    await this.router.navigate(['/lists', list.id]);
   }
 
   protected async deleteList(id: number, name: string): Promise<void> {

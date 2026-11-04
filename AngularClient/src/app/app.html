@@ -97,6 +97,39 @@
         />
       </div>
     }
+    <div class="sidebar-tools">
+      <button
+        type="button"
+        class="btn-icon"
+        data-testid="export-json"
+        title="Export the list as JSON"
+        [disabled]="activeListId() === null"
+        (click)="exportList('json')"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg> JSON
+      </button>
+      <button
+        type="button"
+        class="btn-icon"
+        data-testid="export-csv"
+        title="Export the list as CSV"
+        [disabled]="activeListId() === null"
+        (click)="exportList('csv')"
+      >
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg> CSV
+      </button>
+      <label class="btn-icon" title="Import a list from a JSON file">
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-import" /></svg> Import
+        <input
+          type="file"
+          class="visually-hidden"
+          accept=".json,application/json"
+          data-testid="import-input"
+          aria-label="Import list from JSON file"
+          (change)="importList($any($event.target))"
+        />
+      </label>
+    </div>
   </aside>
   <router-outlet />
 </div>

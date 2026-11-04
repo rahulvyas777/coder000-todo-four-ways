@@ -28,6 +28,13 @@ export class ListsStore {
     return list;
   }
 
+  /** Posts an exported list file; the reload brings in the new list with its counts. */
+  async import(payload: unknown): Promise<TaskList> {
+    const list = await firstValueFrom(this.api.importList(payload));
+    await this.reload();
+    return list;
+  }
+
   async rename(id: number, name: string): Promise<void> {
     const updated = await firstValueFrom(this.api.updateList(id, { name }));
     // Keep the counts we have if the PATCH response leaves them out.
