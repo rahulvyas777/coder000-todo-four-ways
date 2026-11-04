@@ -226,6 +226,8 @@ export class ListView {
     const completed = checkbox.checked;
     // Optimistic: show the new state at once, then replace it with the server's task.
     this.replace({ ...task, completed });
+    // Render it inside the click, so the row never shows the old state after the server answers.
+    this.cdr.detectChanges();
     try {
       const saved = completed
         ? (await firstValueFrom(this.api.completeTask(task.id))).task
