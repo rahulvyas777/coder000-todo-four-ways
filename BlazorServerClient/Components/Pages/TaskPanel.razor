@@ -1,0 +1,149 @@
+@using BlazorServerClient.Services
+@inject TasksApi Api
+
+@* Render with @key="Task.Id" so the drafts below start fresh for every task. *@
+<aside class="panel" data-testid="task-panel" aria-label="Task details">
+    <div class="panel-head">
+        <input type="text" data-testid="panel-title" aria-label="Title" maxlength="200"
+               @bind="title" @bind:after="SaveTitle" />
+        <button type="button" class="btn-icon" data-testid="panel-close" aria-label="Close details" @onclick="OnClose">
+            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+        </button>
+    </div>
+
+    <div class="field">
+        <label for="panel-notes">Notes</label>
+        <textarea id="panel-notes" data-testid="panel-notes" rows="5" @bind="notes" @onblur="SaveNotes"></textarea>
+    </div>
+
+    <div class="field">
+        <label for="panel-due">Due date</label>
+        <input id="panel-due" type="date" data-testid="panel-due"
+               value="@Task.DueDate?.ToString("yyyy-MM-dd")" @onchange="SaveDue" />
+    </div>
+
+    <div class="field">
+        <label for="panel-priority">Priority</label>
+        <select id="panel-priority" data-testid="panel-priority" value="@Task.Priority" @onchange="SavePriority">
+            @for (var p = 0; p < PriorityNames.Length; p++)
+            {
+                <option value="@p">@PriorityNames[p]</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label for="panel-tags">Tags</label>
+        <div class="tags-box">
+            @foreach (var tag in Task.Tags)
+            {
+                <span class="tag" data-testid="panel-tag-@tag" @key="tag">
+                    @tag
+                    <button type="button" aria-label="Remove tag @tag" @onclick="() => RemoveTag(tag)">
+                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+                    </button>
+                </span>
+            }
+            <input id="panel-tags" type="text" data-testid="panel-tags-input" placeholder="Add a tag"
+                   @bind="tagText" @bind:event="oninput" @onkeydown="OnTagKey" />
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="panel-repeat">Repeat</label>
+        <select id="panel-repeat" data-testid="panel-repeat" value="@Task.Repeat" @onchange="SaveRepeat">
+            @foreach (var r in RepeatValues)
+            {
+                <option value="@r">@(char.ToUpperInvariant(r[0]) + r[1..])</option>
+            }
+        </select>
+    </div>
+</aside>
+
+@code {
+    public static readonly string[] PriorityNames = ["None", "Low", "Medium", "High"];
+    private static readonly string[] RepeatValues = ["none", "daily", "weekly", "monthly"];
+
+    [Parameter, EditorRequired] public TaskItem Task { get; set; } = default!;
+    /// <summary>Receives the server's version of the task after every save.</summary>
+    [Parameter] public EventCallback<TaskItem> OnSaved { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string title = "";
+    private string notes = "";
+    private string tagText = "";
+    private int saveSeq;
+
+    protected override void OnInitialized()
+    {
+        title = Task.Title;
+        notes = Task.Notes;
+    }
+
+    // The task is changed locally first; a server response is applied only if no newer save was
+    // started meanwhile (two quick tag edits must not let the older response win).
+    private async Task Save(Action<TaskItem> local, object fields)
+    {
+        local(Task);
+        var seq = ++saveSeq;
+        var updated = await Api.PatchTaskAsync(Task.Id, fields);
+        if (seq == saveSeq) await OnSaved.InvokeAsync(updated);
+    }
+
+    private async Task SaveTitle()
+    {
+        var t = title.Trim();
+        if (t.Length == 0 || t == Task.Title)
+        {
+            title = Task.Title;
+            return;
+        }
+        await Save(x => x.Title = t, new { title = t });
+    }
+
+    private async Task SaveNotes()
+    {
+        if (notes == Task.Notes) return;
+        var n = notes;
+        await Save(x => x.Notes = n, new { notes = n });
+    }
+
+    private async Task SaveDue(ChangeEventArgs e)
+    {
+        DateOnly? due = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null;
+        if (due == Task.DueDate) return;
+        await Save(x => x.DueDate = due, new { dueDate = due?.ToString("yyyy-MM-dd") });
+    }
+
+    private async Task SavePriority(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var p) || p == Task.Priority) return;
+        await Save(x => x.Priority = p, new { priority = p });
+    }
+
+    private async Task SaveRepeat(ChangeEventArgs e)
+    {
+        var r = e.Value?.ToString() ?? "none";
+        if (r == Task.Repeat) return;
+        await Save(x => x.Repeat = r, new { repeat = r });
+    }
+
+    private Task SaveTags(List<string> tags) => Save(x => x.Tags = tags, new { tags });
+
+    private async Task OnTagKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            var tag = tagText.Trim().ToLowerInvariant();
+            tagText = "";
+            if (tag.Length == 0 || Task.Tags.Contains(tag)) return;
+            await SaveTags([.. Task.Tags, tag]);
+        }
+        else if (e.Key == "Backspace" && tagText.Length == 0 && Task.Tags.Count > 0)
+        {
+            await SaveTags(Task.Tags[..^1]);
+        }
+    }
+
+    private Task RemoveTag(string tag) => SaveTags(Task.Tags.Where(t => t != tag).ToList());
+}

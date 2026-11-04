@@ -91,6 +91,14 @@ public sealed class TasksApi(HttpClient http)
         return (await res.Content.ReadFromJsonAsync<TaskItem>())!;
     }
 
+    /// <summary>Sends only the given fields (an anonymous object; a null value clears the field).</summary>
+    public async Task<TaskItem> PatchTaskAsync(int id, object fields)
+    {
+        using var res = await http.PatchAsJsonAsync($"api/tasks/{id}", fields);
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
     /// <summary>Completes the task; the result also carries the next occurrence of a repeating task.</summary>
     public async Task<CompleteResult> CompleteTaskAsync(int id)
     {
