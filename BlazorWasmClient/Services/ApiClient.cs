@@ -45,6 +45,14 @@ public sealed class ApiClient(HttpClient http)
         return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
     }
 
+    /// <summary>Sends only the fields set on <paramref name="patch"/> (an anonymous object).</summary>
+    public async Task<TaskItem> UpdateTaskAsync(int id, object patch)
+    {
+        var response = await http.PatchAsJsonAsync($"api/tasks/{id}", patch);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
     public async Task<CompleteResult> CompleteTaskAsync(int id)
     {
         var response = await http.PostAsync($"api/tasks/{id}/complete", null);

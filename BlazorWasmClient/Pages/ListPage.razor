@@ -1,8 +1,11 @@
 @page "/lists/{ListId:int}"
 @page "/lists/{ListId:int}/tasks/{TaskId:int}"
-@implements IDisposable
+@using Microsoft.AspNetCore.Components.Sections
+@implements IAsyncDisposable
 @inject ApiClient Api
 @inject AppState State
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>@(List?.Name ?? "Tasks") · Tasks</PageTitle>
 
@@ -44,14 +47,14 @@
     {
         @foreach (var task in _tasks)
         {
-            <div class="task-row @(task.Completed ? "completed" : null)" role="listitem"
-                 data-testid="task-row-@task.Id" @key="task.Id">
+            <div class="@RowClass(task)" role="listitem"
+                 data-testid="task-row-@task.Id" @key="task.Id" @onclick="() => OpenTask(task)">
                 <input type="checkbox" class="task-check" data-testid="task-check-@task.Id"
                        checked="@task.Completed" aria-label="@($"Completed: {task.Title}")"
-                       @onchange="() => ToggleTask(task)" />
+                       @onchange="() => ToggleTask(task)" @onclick:stopPropagation="true" />
                 @if (_editingId == task.Id)
                 {
-                    <span class="task-title" data-testid="task-title-@task.Id">
+                    <span class="task-title" data-testid="task-title-@task.Id" @onclick:stopPropagation="true">
                         <input type="text" @ref="_editInput" @bind="_editText" @bind:event="oninput" maxlength="200"
                                aria-label="@($"Edit title of {task.Title}")"
                                @onkeydown="e => OnEditKey(e, task)" @onblur="() => CommitEdit(task)" />
@@ -62,14 +65,89 @@
                     <span class="task-title" data-testid="task-title-@task.Id"
                           @ondblclick="() => StartEdit(task)">@task.Title</span>
                 }
+                <span class="task-meta">
+                    @foreach (var tag in task.Tags)
+                    {
+                        <span class="tag" data-testid="task-tag-@task.Id-@tag">@tag</span>
+                    }
+                    @if (task.Priority > 0)
+                    {
+                        <span class="prio prio-@task.Priority" data-testid="task-priority-@task.Id"
+                              role="img" aria-label="@($"{PriorityNames[task.Priority]} priority")"
+                              title="@($"{PriorityNames[task.Priority]} priority")"></span>
+                    }
+                    @if (task.DueDate is not null)
+                    {
+                        <time class="task-due" data-testid="task-due-@task.Id" datetime="@task.DueDate">@FormatDue(task.DueDate)</time>
+                    }
+                </span>
                 <button type="button" class="btn-icon btn-danger task-delete" data-testid="task-delete-@task.Id"
-                        aria-label="@($"Delete {task.Title}")" @onclick="() => DeleteTask(task)">
+                        aria-label="@($"Delete {task.Title}")" @onclick="() => DeleteTask(task)"
+                        @onclick:stopPropagation="true">
                     <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
                 </button>
             </div>
         }
     }
 </div>
+
+@if (PanelTask is { } pt)
+{
+    <SectionContent SectionName="task-panel">
+        <aside class="panel" data-testid="task-panel" aria-label="Task details">
+            <div class="panel-head">
+                <input type="text" data-testid="panel-title" aria-label="Title" maxlength="200"
+                       @bind="_pTitle" @bind:after="() => SaveTitle(pt)" />
+                <button type="button" class="btn-icon" data-testid="panel-close" aria-label="Close details"
+                        @onclick="ClosePanel">
+                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+                </button>
+            </div>
+
+            <label for="panel-notes">Notes</label>
+            @* change fires when the textarea loses focus, so notes save on blur *@
+            <textarea id="panel-notes" data-testid="panel-notes"
+                      @bind="_pNotes" @bind:after="() => SaveNotes(pt)"></textarea>
+
+            <label for="panel-due">Due date</label>
+            <input id="panel-due" type="date" data-testid="panel-due" value="@pt.DueDate"
+                   @onchange="e => SaveDue(pt, e.Value as string)" />
+
+            <label for="panel-priority">Priority</label>
+            <select id="panel-priority" data-testid="panel-priority" value="@pt.Priority"
+                    @onchange="e => SavePriority(pt, e.Value as string)">
+                @for (var p = 0; p < PriorityNames.Length; p++)
+                {
+                    <option value="@p">@PriorityNames[p]</option>
+                }
+            </select>
+
+            <label for="panel-tags-input">Tags</label>
+            <div class="tags-box">
+                @foreach (var tag in pt.Tags)
+                {
+                    <span class="tag" data-testid="panel-tag-@tag">
+                        @tag
+                        <button type="button" aria-label="@($"Remove tag {tag}")" @onclick="() => RemoveTag(pt, tag)">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-close" /></svg>
+                        </button>
+                    </span>
+                }
+                <input id="panel-tags-input" type="text" data-testid="panel-tags-input" placeholder="Add a tag"
+                       @bind="_pTag" @bind:event="oninput" @onkeydown="e => OnTagKey(e, pt)" />
+            </div>
+
+            <label for="panel-repeat">Repeat</label>
+            <select id="panel-repeat" data-testid="panel-repeat" value="@pt.Repeat"
+                    @onchange="e => SaveRepeat(pt, e.Value as string)">
+                <option value="none">Never</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+            </select>
+        </aside>
+    </SectionContent>
+}
 
 @code {
     [Parameter] public int ListId { get; set; }
@@ -91,6 +169,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        SyncPanel();
         if (ListId == _loadedListId) return;
         _loadedListId = ListId;
         _tasks = null;
@@ -100,7 +179,11 @@
         try
         {
             var tasks = await Api.GetTasksAsync(ListId);
-            if (version == _loadVersion) _tasks = tasks;
+            if (version == _loadVersion)
+            {
+                _tasks = tasks;
+                SyncPanel();
+            }
         }
         catch (HttpRequestException ex)
         {
@@ -122,6 +205,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            _keysModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/keys.js");
+            _keys = await _keysModule.InvokeAsync<IJSObjectReference>("register", _selfRef);
+        }
         if (_focusEdit && _editingId is not null)
         {
             _focusEdit = false;
@@ -216,7 +305,146 @@
         await State.ReloadListsAsync();
     }
 
+    // ---- Row details and the detail panel ----
+
+    private static readonly string[] PriorityNames = ["None", "Low", "Medium", "High"];
+
+    private TaskItem? PanelTask => TaskId is int id ? _tasks?.Find(t => t.Id == id) : null;
+    private int? _panelTaskId;
+    private string _pTitle = "";
+    private string _pNotes = "";
+    private string _pTag = "";
+
+    private DotNetObjectReference<ListPage>? _selfRef;
+    private IJSObjectReference? _keysModule;
+    private IJSObjectReference? _keys;
+
+    private string RowClass(TaskItem task)
+    {
+        var css = "task-row";
+        if (task.Completed) css += " completed";
+        if (IsOverdue(task)) css += " overdue";
+        if (task.Id == TaskId) css += " open";
+        return css;
+    }
+
+    private static bool IsOverdue(TaskItem task) =>
+        !task.Completed && task.DueDate is not null
+        && string.CompareOrdinal(task.DueDate, DateTime.Today.ToString("yyyy-MM-dd")) < 0;
+
+    private static string FormatDue(string dueDate) =>
+        DateOnly.TryParseExact(dueDate, "yyyy-MM-dd", out var d)
+            ? d.ToString(d.Year == DateTime.Today.Year ? "MMM d" : "MMM d, yyyy")
+            : dueDate;
+
+    /// <summary>Loads the panel's editable text fields when it opens on another task.</summary>
+    private void SyncPanel()
+    {
+        var task = PanelTask;
+        if (task?.Id == _panelTaskId) return;
+        _panelTaskId = task?.Id;
+        _pTitle = task?.Title ?? "";
+        _pNotes = task?.Notes ?? "";
+        _pTag = "";
+    }
+
+    // The query (filter, search, sort in later steps) is kept when the panel opens or closes.
+    private string Query => new Uri(Nav.Uri).Query;
+
+    private void OpenTask(TaskItem task)
+    {
+        if (task.Id != TaskId) Nav.NavigateTo($"lists/{ListId}/tasks/{task.Id}{Query}");
+    }
+
+    private void ClosePanel() => Nav.NavigateTo($"lists/{ListId}{Query}");
+
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (TaskId is not null) ClosePanel();
+    }
+
+    private async Task Save(TaskItem task, object patch) =>
+        await Run(async () => Replace(await Api.UpdateTaskAsync(task.Id, patch)));
+
+    private async Task SaveTitle(TaskItem task)
+    {
+        var title = _pTitle.Trim();
+        if (title.Length == 0) { _pTitle = task.Title; return; }
+        if (title == task.Title) return;
+        task.Title = title;
+        await Save(task, new { title });
+    }
+
+    private async Task SaveNotes(TaskItem task)
+    {
+        if (_pNotes == task.Notes) return;
+        task.Notes = _pNotes;
+        await Save(task, new { notes = _pNotes });
+    }
+
+    private async Task SaveDue(TaskItem task, string? value)
+    {
+        var dueDate = string.IsNullOrEmpty(value) ? null : value;
+        if (dueDate == task.DueDate) return;
+        task.DueDate = dueDate;
+        await Save(task, new { dueDate });
+    }
+
+    private async Task SavePriority(TaskItem task, string? value)
+    {
+        if (!int.TryParse(value, out var priority) || priority == task.Priority) return;
+        task.Priority = priority;
+        await Save(task, new { priority });
+    }
+
+    private async Task SaveRepeat(TaskItem task, string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value == task.Repeat) return;
+        task.Repeat = value;
+        await Save(task, new { repeat = value });
+    }
+
+    private async Task SaveTags(TaskItem task, List<string> tags)
+    {
+        task.Tags = tags;
+        await Save(task, new { tags });
+    }
+
+    private async Task OnTagKey(KeyboardEventArgs e, TaskItem task)
+    {
+        if (e.Key == "Enter")
+        {
+            // Tags are lower-case and unique (the contract).
+            var tag = _pTag.Trim().ToLowerInvariant();
+            _pTag = "";
+            if (tag.Length == 0 || task.Tags.Contains(tag)) return;
+            await SaveTags(task, [.. task.Tags, tag]);
+        }
+        else if (e.Key == "Backspace" && _pTag.Length == 0 && task.Tags.Count > 0)
+        {
+            await SaveTags(task, task.Tags[..^1]);
+        }
+    }
+
+    private Task RemoveTag(TaskItem task, string tag) =>
+        SaveTags(task, task.Tags.Where(t => t != tag).ToList());
+
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => State.Changed -= OnStateChanged;
+    public async ValueTask DisposeAsync()
+    {
+        State.Changed -= OnStateChanged;
+        try
+        {
+            if (_keys is not null)
+            {
+                await _keys.InvokeVoidAsync("dispose");
+                await _keys.DisposeAsync();
+            }
+            if (_keysModule is not null) await _keysModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        _selfRef?.Dispose();
+    }
 }
