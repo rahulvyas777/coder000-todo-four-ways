@@ -16,3 +16,6 @@ playwright-report/
 READY
 .vs/
 .vscode/
+run/
+publish/
+publish-aot/
