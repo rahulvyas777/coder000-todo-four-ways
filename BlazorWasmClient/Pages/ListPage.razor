@@ -160,6 +160,13 @@
                               role="img" aria-label="@($"{PriorityNames[task.Priority]} priority")"
                               title="@($"{PriorityNames[task.Priority]} priority")"></span>
                     }
+                    @if (task.Repeat is not ("none" or ""))
+                    {
+                        <span class="task-repeat" data-testid="task-repeat-@task.Id" role="img"
+                              aria-label="@($"Repeats {task.Repeat}")" title="@($"Repeats {task.Repeat}")">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-repeat" /></svg>
+                        </span>
+                    }
                     @if (task.DueDate is not null)
                     {
                         <time class="task-due" data-testid="task-due-@task.Id" datetime="@task.DueDate">@FormatDue(task.DueDate)</time>
@@ -478,9 +485,19 @@
         {
             if (completing)
             {
+                var listId = ListId;
                 var result = await Api.CompleteTaskAsync(task.Id);
                 Replace(result.Task);
-                if (result.Next is not null && result.Next.ListId == ListId) _tasks?.Add(result.Next);
+                if (result.Next is { } next)
+                {
+                    if (next.ListId == ListId) _tasks?.Add(next);
+                    // Undo puts the series back as it was: the original open, the next one gone.
+                    ShowUndo($"Completed \"{task.Title}\"", listId, async () =>
+                    {
+                        await Api.DeleteTaskAsync(next.Id);
+                        await Api.ReopenTaskAsync(task.Id);
+                    });
+                }
             }
             else
             {
