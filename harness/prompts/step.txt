@@ -1,0 +1,5 @@
+Read CLAUDE.md and SPEC.md. Implement step {NN} ({NAME}) of SPEC.md in this project.
+Run the end-to-end tests for this step with the command in CLAUDE.md, fix the application
+until they pass, and make sure the tests of every earlier step still pass. Do not edit
+anything under e2e/ or shared/ and do not commit. When the tests pass, stop and print your
+summary. If you cannot make them pass, stop and say exactly which tests fail and why.

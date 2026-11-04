@@ -1,0 +1,2 @@
+The end-to-end tests for step {NN} fail. Run them with the command in CLAUDE.md, read the
+failures, fix the application code (never the tests), and stop when they pass. Do not commit.

@@ -1,0 +1,17 @@
+[
+  { "n": 0, "tag": "step00", "name": "Shell" },
+  { "n": 1, "tag": "step01", "name": "Lists" },
+  { "n": 2, "tag": "step02", "name": "Tasks" },
+  { "n": 3, "tag": "step03", "name": "Detail panel" },
+  { "n": 4, "tag": "step04", "name": "Filters" },
+  { "n": 5, "tag": "step05", "name": "Search and sort" },
+  { "n": 6, "tag": "step06", "name": "Drag-and-drop reorder" },
+  { "n": 7, "tag": "step07", "name": "Subtasks" },
+  { "n": 8, "tag": "step08", "name": "Bulk actions" },
+  { "n": 9, "tag": "step09", "name": "Undo" },
+  { "n": 10, "tag": "step10", "name": "Keyboard shortcuts" },
+  { "n": 11, "tag": "step11", "name": "Dark mode" },
+  { "n": 12, "tag": "step12", "name": "Import and export" },
+  { "n": 13, "tag": "step13", "name": "Recurring tasks" },
+  { "n": 14, "tag": "step14", "name": "The 10,000-item list" }
+]

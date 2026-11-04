@@ -1,0 +1,11 @@
+# Denied outright in every metered session (SERIES-SPEC.md "Session protocol" step 3).
+# A denied attempt still shows in the transcript and is counted; run-step.ps1 also reverts any
+# change under e2e/ or shared/ made some other way and records it as test_edit.
+Edit(e2e/**)
+Write(e2e/**)
+Edit(shared/**)
+Write(shared/**)
+# The PowerShell tool is removed entirely: in October's transcripts the model reached for it and
+# was denied 10 times in 12, which would count against the framework instead of the harness.
+# Every session has the Bash tool (Git Bash on this PC) with the commands in allowed-tools.txt.
+PowerShell

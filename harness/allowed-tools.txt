@@ -1,0 +1,29 @@
+# Allowed tools for every metered session, one per line (joined with commas into one
+# --allowedTools value by run-step.ps1). Seeded from SERIES-SPEC.md "Session protocol" step 3;
+# the dry run on step 0 of the reference client settles the final list.
+Read
+Edit
+Write
+Glob
+Grep
+Bash(npm:*)
+Bash(npx:*)
+Bash(node:*)
+Bash(dotnet:*)
+Bash(git status:*)
+Bash(git diff:*)
+Bash(curl:*)
+Bash(ls:*)
+Bash(cat:*)
+Bash(dir:*)
+Bash(cd:*)
+Bash(pwd)
+Bash(echo:*)
+Bash(grep:*)
+Bash(find:*)
+Bash(head:*)
+Bash(tail:*)
+Bash(wc:*)
+Bash(mkdir:*)
+Bash(cp:*)
+Bash(tsc:*)

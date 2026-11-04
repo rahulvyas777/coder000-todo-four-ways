@@ -1,0 +1,60 @@
+{
+  "_comment": "Paths are relative to the fc folder (the parent of this repo). Port plan from SERIES-SPEC.md: API 160x0, dev 160x1, production host 160x2. folder is the root of the client's own git repository (it holds the scaffolded project, e2e, shared, SPEC.md and CLAUDE.md); e2e holds .env.client, whose CLIENT_START is the devCommand below, run from folder. pathPrefix (optional) is a folder under fc that run-step.ps1 prepends to PATH for the session and the verdict: react and angular use the portable Node 22.23.4 there because @angular/cli 22 refuses the system Node 22.19.0. buildCommand runs from folder; prodRoot is relative to folder.",
+  "clients": [
+    {
+      "name": "blazor-wasm", "x": 1, "kind": "dotnet",
+      "folder": "clients/blazor-wasm", "e2e": "clients/blazor-wasm/e2e", "project": "BlazorWasmClient",
+      "apiPort": 16010, "devPort": 16011, "prodPort": 16012,
+      "scaffold": "dotnet new blazorwasm -o BlazorWasmClient",
+      "devCommand": "dotnet run --project BlazorWasmClient --urls http://localhost:16011",
+      "buildCommand": "dotnet publish BlazorWasmClient -c Release -o publish",
+      "prodRoot": "publish/wwwroot"
+    },
+    {
+      "name": "blazor-server", "x": 2, "kind": "dotnet",
+      "folder": "clients/blazor-server", "e2e": "clients/blazor-server/e2e", "project": "BlazorServerClient",
+      "apiPort": 16020, "devPort": 16021, "prodPort": 16022,
+      "scaffold": "dotnet new blazor -o BlazorServerClient --interactivity Server --all-interactive",
+      "devCommand": "dotnet run --project BlazorServerClient --urls http://localhost:16021",
+      "buildCommand": "dotnet publish BlazorServerClient -c Release -o publish",
+      "prodRoot": "publish",
+      "prodCommand": "dotnet publish/BlazorServerClient.dll --urls http://localhost:16022"
+    },
+    {
+      "name": "react", "x": 3, "kind": "npm", "pathPrefix": "node22",
+      "folder": "clients/react", "e2e": "clients/react/e2e", "project": "ReactClient",
+      "apiPort": 16030, "devPort": 16031, "prodPort": 16032,
+      "scaffold": "npm create vite@latest ReactClient -- --template react-ts --no-interactive --no-immediate; npm install",
+      "devCommand": "npm --prefix ReactClient run dev -- --port 16031 --strictPort",
+      "buildCommand": "npm --prefix ReactClient run build",
+      "prodRoot": "ReactClient/dist"
+    },
+    {
+      "name": "angular", "x": 4, "kind": "npm", "pathPrefix": "node22",
+      "folder": "clients/angular", "e2e": "clients/angular/e2e", "project": "AngularClient",
+      "apiPort": 16040, "devPort": 16041, "prodPort": 16042,
+      "scaffold": "npx -y -p @angular/cli@22 ng new AngularClient --style css --ssr false --skip-git --package-manager npm --defaults",
+      "devCommand": "npm --prefix AngularClient run start -- --port 16041",
+      "buildCommand": "npm --prefix AngularClient run build",
+      "prodRoot": "AngularClient/dist/AngularClient/browser"
+    },
+    {
+      "name": "reference", "x": 5, "kind": "npm",
+      "folder": "repo/reference", "e2e": "repo/harness/e2e", "project": ".",
+      "apiPort": 16050, "devPort": 16051, "prodPort": 16052,
+      "scaffold": "npm create vite@latest reference -- --template vanilla-ts",
+      "devCommand": "npm run dev -- --port 16051 --strictPort",
+      "buildCommand": "npm run build",
+      "prodRoot": "dist"
+    },
+    {
+      "name": "dryrun", "x": 3, "kind": "npm", "pathPrefix": "node22",
+      "folder": "tmp-a/dryrun/react", "e2e": "tmp-a/dryrun/react/e2e", "project": "ReactClient",
+      "apiPort": 16030, "devPort": 16031, "prodPort": 16032,
+      "scaffold": "git clone of clients/react at its scaffold commit; results flagged dry_run and excluded from the tables",
+      "devCommand": "npm --prefix ReactClient run dev -- --port 16031 --strictPort",
+      "buildCommand": "npm --prefix ReactClient run build",
+      "prodRoot": "ReactClient/dist"
+    }
+  ]
+}
