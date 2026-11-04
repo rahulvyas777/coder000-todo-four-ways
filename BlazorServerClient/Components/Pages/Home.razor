@@ -170,8 +170,9 @@
                     {
                         <p class="empty-state">Nothing here</p>
                     }
-                    @foreach (var t in visible)
-                    {
+                    @* Only the rows in (and near) the viewport are rendered: rows are a fixed 40 px, and the
+                       overscan keeps every row of a normal-sized list in the DOM. *@
+                    <Virtualize Items="visible" ItemSize="40" OverscanCount="50" Context="t">
                         <div class="task-row @RowClass(t)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id"
                              @onclick="() => OpenTask(t)">
                             @if (CurrentSort == "manual")
@@ -232,7 +233,7 @@
                                 <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
                             </button>
                         </div>
-                    }
+                    </Virtualize>
                 </div>
             }
         }
