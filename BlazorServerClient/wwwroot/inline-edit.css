@@ -1,0 +1,3 @@
+/* Inline editors (see inline-edit.js): the editor shows only while its host is editing. */
+[data-inline-edit-host]:not([data-editing]) [data-inline-edit-input] { display: none; }
+[data-inline-edit-host][data-editing] [data-inline-edit-view] { display: none; }

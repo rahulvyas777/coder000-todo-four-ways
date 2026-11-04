@@ -56,4 +56,24 @@ public sealed class TasksApi(HttpClient http)
         res.EnsureSuccessStatusCode();
         return await res.Content.ReadFromJsonAsync<List<TaskItem>>() ?? [];
     }
+
+    public async Task<TaskList> CreateListAsync(string name)
+    {
+        using var res = await http.PostAsJsonAsync("api/lists", new { name });
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
+    public async Task<TaskList> RenameListAsync(int id, string name)
+    {
+        using var res = await http.PatchAsJsonAsync($"api/lists/{id}", new { name });
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
+    public async Task DeleteListAsync(int id)
+    {
+        using var res = await http.DeleteAsync($"api/lists/{id}");
+        res.EnsureSuccessStatusCode();
+    }
 }

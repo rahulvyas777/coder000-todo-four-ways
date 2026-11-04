@@ -4,6 +4,7 @@
 @using BlazorServerClient.Services
 @inject TasksApi Api
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>@(CurrentList is null ? "Tasks" : $"{CurrentList.Name} · Tasks")</PageTitle>
 
@@ -11,20 +12,50 @@
     <aside class="sidebar" aria-label="Lists">
         <div class="sidebar-head">
             <h1 class="app-title" data-testid="app-title">Tasks</h1>
+            <div class="sidebar-tools">
+                <button type="button" class="btn-icon" data-testid="list-add" aria-label="Add list"
+                        aria-expanded="@(adding ? "true" : "false")" @onclick="StartAdd">
+                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
+                </button>
+            </div>
         </div>
         <nav aria-label="Lists">
             <ul class="list-nav" data-testid="list-nav">
                 @foreach (var l in lists)
                 {
-                    <li class="list-item @(l.Id == ListId ? "active" : null)" data-testid="list-item-@l.Id">
-                        <a href="lists/@l.Id" aria-current="@(l.Id == ListId ? "page" : null)">
-                            <span>@l.Name</span>
+                    @* The rename editor is always rendered and shown by inline-edit.js on the click itself. *@
+                    <li class="list-item @(l.Id == ListId ? "active" : null)" data-testid="list-item-@l.Id"
+                        data-inline-edit-host data-editing="@(renamingId == l.Id)" @key="l.Id">
+                        <input type="text" aria-label="List name" maxlength="80" data-inline-edit-input
+                               @bind:get="renamingId == l.Id ? renameText : l.Name"
+                               @bind:set="v => renameText = v" @bind:event="oninput"
+                               @onkeydown="e => OnRenameKey(e, l)" @onblur="() => CommitRename(l)" />
+                        <a href="lists/@l.Id" aria-current="@(l.Id == ListId ? "page" : null)" data-inline-edit-view>
+                            <span data-inline-edit="dblclick" @ondblclick="() => StartRename(l)">@l.Name</span>
                             <span class="list-count" data-testid="list-count-@l.Id">@l.OpenCount<span class="visually-hidden"> open</span></span>
                         </a>
+                        <span class="list-actions" data-inline-edit-view>
+                            <button type="button" class="btn-icon" data-testid="list-rename-@l.Id" data-inline-edit="click"
+                                    aria-label="Rename list @l.Name" @onclick="() => StartRename(l)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-edit" /></svg>
+                            </button>
+                            <button type="button" class="btn-icon btn-danger" data-testid="list-delete-@l.Id"
+                                    aria-label="Delete list @l.Name" @onclick="() => DeleteList(l)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                            </button>
+                        </span>
                     </li>
                 }
             </ul>
         </nav>
+        @if (adding)
+        {
+            <div class="list-add-row">
+                <input type="text" data-testid="list-name-input" aria-label="New list name" maxlength="80"
+                       placeholder="New list" @ref="addInput"
+                       @bind="newName" @bind:event="oninput" @onkeydown="OnAddKey" />
+            </div>
+        }
     </aside>
 
     <main class="main">
@@ -39,16 +70,25 @@
                 <h2>@CurrentList?.Name</h2>
                 <span class="task-count" data-testid="task-count">@OpenCount of @tasks.Count open</span>
             </div>
-            <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
-                @foreach (var t in tasks)
-                {
-                    <div class="task-row @(t.Completed ? "completed" : null)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id">
-                        <input type="checkbox" class="task-check" data-testid="task-check-@t.Id"
-                               checked="@t.Completed" disabled aria-label="Completed: @t.Title" />
-                        <span class="task-title" data-testid="task-title-@t.Id">@t.Title</span>
-                    </div>
-                }
-            </div>
+            @* Prerendered HTML is inert until the circuit connects, so clicks there are lost; the rows
+               container appears only once the page is interactive. *@
+            @if (!RendererInfo.IsInteractive)
+            {
+                <p class="empty-state">Loading…</p>
+            }
+            else
+            {
+                <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
+                    @foreach (var t in tasks)
+                    {
+                        <div class="task-row @(t.Completed ? "completed" : null)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id">
+                            <input type="checkbox" class="task-check" data-testid="task-check-@t.Id"
+                                   checked="@t.Completed" disabled aria-label="Completed: @t.Title" />
+                            <span class="task-title" data-testid="task-title-@t.Id">@t.Title</span>
+                        </div>
+                    }
+                </div>
+            }
         }
     </main>
 </div>
@@ -81,6 +121,82 @@
             notFound = loaded is null;
             tasks = loaded ?? [];
             loadedListId = ListId;
+        }
+    }
+
+    // Sidebar list editing: add, inline rename, delete.
+    private bool adding;
+    private string newName = "";
+    private ElementReference addInput;
+    private int? renamingId;
+    private string renameText = "";
+    private bool focusAdd;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAdd && adding)
+        {
+            focusAdd = false;
+            await addInput.FocusAsync();
+        }
+    }
+
+    private void StartAdd()
+    {
+        adding = true;
+        newName = "";
+        focusAdd = true;
+    }
+
+    private async Task OnAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            adding = false;
+            return;
+        }
+        if (e.Key != "Enter") return;
+        var name = newName.Trim();
+        if (name.Length == 0) return;
+        adding = false;
+        newName = "";
+        var created = await Api.CreateListAsync(name);
+        lists = await Api.GetListsAsync();
+        Nav.NavigateTo($"lists/{created.Id}");
+    }
+
+    private void StartRename(TaskList l)
+    {
+        renamingId = l.Id;
+        renameText = l.Name;
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e, TaskList l)
+    {
+        if (e.Key == "Enter") await CommitRename(l);
+        else if (e.Key == "Escape") renamingId = null;
+    }
+
+    private async Task CommitRename(TaskList l)
+    {
+        if (renamingId != l.Id) return;
+        renamingId = null;
+        var name = renameText.Trim();
+        if (name.Length == 0 || name == l.Name) return;
+        var updated = await Api.RenameListAsync(l.Id, name);
+        // The lists may have been reloaded (navigation) since this handler captured `l`.
+        if (lists.FirstOrDefault(x => x.Id == updated.Id) is { } current) current.Name = updated.Name;
+    }
+
+    private async Task DeleteList(TaskList l)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete the list \"{l.Name}\" and its tasks?")) return;
+        await Api.DeleteListAsync(l.Id);
+        lists = await Api.GetListsAsync();
+        if (l.Id == ListId)
+        {
+            loadedListId = null;
+            Nav.NavigateTo(lists.Count > 0 ? $"lists/{lists[0].Id}" : "", replace: true);
         }
     }
 }

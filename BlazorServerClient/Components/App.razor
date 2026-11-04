@@ -7,6 +7,7 @@
     <base href="/" />
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["inline-edit.css"]" />
     <link rel="stylesheet" href="@Assets["BlazorServerClient.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
@@ -16,6 +17,7 @@
 <body>
     <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
+    <script src="@Assets["inline-edit.js"]"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 
