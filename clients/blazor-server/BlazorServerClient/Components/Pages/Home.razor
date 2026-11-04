@@ -1,0 +1,793 @@
+@page "/"
+@page "/lists/{ListId:int}"
+@page "/lists/{ListId:int}/tasks/{TaskId:int}"
+@using BlazorServerClient.Services
+@inject TasksApi Api
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@(CurrentList is null ? "Tasks" : $"{CurrentList.Name} · Tasks")</PageTitle>
+
+<div class="app">
+    <aside class="sidebar" aria-label="Lists">
+        <div class="sidebar-head">
+            <h1 class="app-title" data-testid="app-title">Tasks</h1>
+            <div class="sidebar-tools">
+                <button type="button" class="btn-icon theme-toggle" data-testid="theme-toggle" aria-label="Toggle dark mode">
+                    <svg class="icon icon-moon" aria-hidden="true"><use href="icons.svg#i-moon" /></svg>
+                    <svg class="icon icon-sun" aria-hidden="true"><use href="icons.svg#i-sun" /></svg>
+                </button>
+                <button type="button" class="btn-icon" data-testid="list-add" aria-label="Add list"
+                        aria-expanded="@(adding ? "true" : "false")" @onclick="StartAdd">
+                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
+                </button>
+            </div>
+        </div>
+        <nav aria-label="Lists">
+            <ul class="list-nav" data-testid="list-nav">
+                @foreach (var l in lists)
+                {
+                    @* The rename editor is always rendered and shown by inline-edit.js on the click itself. *@
+                    <li class="list-item @(l.Id == ListId ? "active" : null)" data-testid="list-item-@l.Id"
+                        data-inline-edit-host data-editing="@(renamingId == l.Id)" @key="l.Id">
+                        <input type="text" aria-label="List name" maxlength="80" data-inline-edit-input
+                               @bind:get="renamingId == l.Id ? renameText : l.Name"
+                               @bind:set="v => renameText = v" @bind:event="oninput"
+                               @onkeydown="e => OnRenameKey(e, l)" @onblur="() => CommitRename(l)" />
+                        <a href="lists/@l.Id" aria-current="@(l.Id == ListId ? "page" : null)" data-inline-edit-view>
+                            <span data-inline-edit="dblclick" @ondblclick="() => StartRename(l)">@l.Name</span>
+                            <span class="list-count" data-testid="list-count-@l.Id">@l.OpenCount<span class="visually-hidden"> open</span></span>
+                        </a>
+                        <span class="list-actions" data-inline-edit-view>
+                            <button type="button" class="btn-icon" data-testid="list-rename-@l.Id" data-inline-edit="click"
+                                    aria-label="Rename list @l.Name" @onclick="() => StartRename(l)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-edit" /></svg>
+                            </button>
+                            <button type="button" class="btn-icon btn-danger" data-testid="list-delete-@l.Id"
+                                    aria-label="Delete list @l.Name" @onclick="() => DeleteList(l)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                            </button>
+                        </span>
+                    </li>
+                }
+            </ul>
+        </nav>
+        @if (adding)
+        {
+            <div class="list-add-row">
+                <input type="text" data-testid="list-name-input" aria-label="New list name" maxlength="80"
+                       placeholder="New list" @ref="addInput"
+                       @bind="newName" @bind:event="oninput" @onkeydown="OnAddKey" />
+            </div>
+        }
+    </aside>
+
+    <main class="main">
+        @if (notFound)
+        {
+            <div class="main-head"><h2>List not found</h2></div>
+            <p class="empty-state">This list does not exist or was deleted.</p>
+        }
+        else
+        {
+            <div class="main-head">
+                <h2>@CurrentList?.Name</h2>
+                <span class="task-count" data-testid="task-count">@OpenCount of @tasks.Count open</span>
+                @if (RendererInfo.IsInteractive && CurrentList is { } ioList)
+                {
+                    @* Real downloads through this server's /export proxy (the `download` attribute keeps the
+                       Blazor router from intercepting the click). *@
+                    <div class="list-io" role="group" aria-label="Import and export">
+                        <a class="btn" data-testid="export-json" href="export/lists/@ioList.Id?format=json"
+                           download="@($"{ioList.Name}.json")" aria-label="Export @ioList.Name as JSON">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg>JSON
+                        </a>
+                        <a class="btn" data-testid="export-csv" href="export/lists/@ioList.Id?format=csv"
+                           download="@($"{ioList.Name}.csv")" aria-label="Export @ioList.Name as CSV">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-export" /></svg>CSV
+                        </a>
+                        <label class="btn import-btn">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-import" /></svg>Import
+                            <InputFile class="visually-hidden" data-testid="import-input" accept=".json,application/json"
+                                       aria-label="Import a list from a JSON file" OnChange="ImportFile" @key="importKey" />
+                        </label>
+                    </div>
+                }
+            </div>
+            @if (importError is not null)
+            {
+                <p class="list-io-error" role="alert">@importError</p>
+            }
+            @* Prerendered HTML is inert until the circuit connects, so clicks there are lost; the rows
+               container appears only once the page is interactive. *@
+            @if (!RendererInfo.IsInteractive)
+            {
+                <p class="empty-state">Loading…</p>
+            }
+            else
+            {
+                <div class="task-add">
+                    <input type="text" data-testid="task-add-input" aria-label="New task" maxlength="200"
+                           placeholder="Add a task" @bind="newTaskTitle" @bind:event="oninput" @onkeydown="OnTaskAddKey" />
+                </div>
+                <div class="toolbar">
+                    <div class="filter-bar" role="group" aria-label="Filter tasks">
+                        @foreach (var (view, label) in Views)
+                        {
+                            <button type="button" class="filter" data-testid="filter-@view"
+                                    aria-pressed="@(CurrentView == view ? "true" : "false")" @onclick="() => SetView(view)">
+                                @label <span class="count">@tasks.Count(t => InView(t, view))</span>
+                            </button>
+                        }
+                    </div>
+                    <div class="search">
+                        <input type="search" data-testid="search-input" aria-label="Search tasks" placeholder="Search"
+                               @bind:get="searchText" @bind:set="SetSearch" @bind:event="oninput" />
+                    </div>
+                    <div class="sort">
+                        <select data-testid="sort-select" aria-label="Sort tasks" @bind:get="CurrentSort" @bind:set="SetSort">
+                            @foreach (var (sort, label) in Sorts)
+                            {
+                                <option value="@sort">@label</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                var visible = VisibleTasks();
+                var allSelected = visible.Count > 0 && visible.All(t => selected.Contains(t.Id));
+                <div class="select-all-row">
+                    <label>
+                        <input type="checkbox" class="select-check" data-testid="select-all" checked="@allSelected"
+                               @onchange="() => ToggleSelectAll(visible)" />
+                        Select all
+                    </label>
+                </div>
+                @if (selected.Count > 0)
+                {
+                    var targets = lists.Where(l => l.Id != ListId).ToList();
+                    <div class="bulk-bar" data-testid="bulk-bar" role="region" aria-label="Bulk actions">
+                        <span class="bulk-count" data-testid="bulk-count">@selected.Count selected</span>
+                        <button type="button" data-testid="bulk-complete" @onclick="BulkComplete">Complete</button>
+                        <button type="button" class="btn-danger" data-testid="bulk-delete" @onclick="BulkDelete">Delete</button>
+                        @if (targets.Count > 0)
+                        {
+                            <select data-testid="bulk-move-target" aria-label="Move to list"
+                                    @bind:get="MoveTarget(targets)" @bind:set="v => bulkTarget = v">
+                                @foreach (var l in targets)
+                                {
+                                    <option value="@l.Id">@l.Name</option>
+                                }
+                            </select>
+                            <button type="button" data-testid="bulk-move" @onclick="() => BulkMove(MoveTarget(targets))">Move</button>
+                        }
+                        @* panel.js clicks this on Escape. *@
+                        <button type="button" data-bulk-clear @onclick="ClearSelection">Clear selection</button>
+                    </div>
+                }
+                <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
+                    @if (visible.Count == 0)
+                    {
+                        <p class="empty-state">Nothing here</p>
+                    }
+                    @* Only the rows in (and near) the viewport are rendered: rows are a fixed 40 px, and the
+                       overscan keeps every row of a normal-sized list in the DOM. *@
+                    <Virtualize Items="visible" ItemSize="40" OverscanCount="50" Context="t">
+                        <div class="task-row @RowClass(t)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id"
+                             @onclick="() => OpenTask(t)">
+                            @if (CurrentSort == "manual")
+                            {
+                                @* reorder.js runs the native drag; the drop calls MoveTask. *@
+                                <button type="button" class="drag-handle" data-testid="drag-handle-@t.Id" draggable="true"
+                                        aria-label="Drag to reorder @t.Title" @onclick:stopPropagation>
+                                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
+                                </button>
+                            }
+                            <input type="checkbox" class="select-check" data-testid="select-check-@t.Id" @onclick:stopPropagation
+                                   checked="@selected.Contains(t.Id)" @onchange="() => ToggleSelected(t.Id)" aria-label="Select: @t.Title" />
+                            <input type="checkbox" class="task-check" data-testid="task-check-@t.Id" @onclick:stopPropagation
+                                   checked="@t.Completed" @onchange="() => ToggleTask(t)" aria-label="Completed: @t.Title" />
+                            @* Same inline editor as the list rename (inline-edit.js opens it on the double-click). *@
+                            <span class="task-title" data-testid="task-title-@t.Id" data-inline-edit-host
+                                  data-inline-edit="dblclick" data-editing="@(editingTaskId == t.Id)"
+                                  @ondblclick="() => StartEditTask(t)">
+                                <input type="text" aria-label="Task title" maxlength="200" data-inline-edit-input
+                                       @onclick:stopPropagation @bind:get="editingTaskId == t.Id ? editTitle : t.Title"
+                                       @bind:set="v => editTitle = v ?? string.Empty" @bind:event="oninput"
+                                       @onkeydown="e => OnEditTaskKey(e, t)" @onblur="() => CommitEditTask(t)" />
+                                <span data-inline-edit-view>@t.Title</span>
+                            </span>
+                            <span class="task-meta">
+                                @foreach (var tag in t.Tags)
+                                {
+                                    <span class="tag" data-testid="task-tag-@t.Id-@tag">@tag</span>
+                                }
+                                @if (t.Subtasks.Count > 0)
+                                {
+                                    var done = t.Subtasks.Count(s => s.Done);
+                                    <span class="subtask-progress" data-testid="subtask-progress-@t.Id"
+                                          aria-label="@done of @t.Subtasks.Count subtasks done">
+                                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-check" /></svg>@done/@t.Subtasks.Count
+                                    </span>
+                                }
+                                @if (t.Repeat is "daily" or "weekly" or "monthly")
+                                {
+                                    <span class="task-repeat" data-testid="task-repeat-@t.Id" role="img"
+                                          aria-label="Repeats @t.Repeat" title="Repeats @t.Repeat">
+                                        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-repeat" /></svg>
+                                    </span>
+                                }
+                                @if (t.DueDate is { } due)
+                                {
+                                    <time class="task-due" data-testid="task-due-@t.Id" datetime="@due.ToString("yyyy-MM-dd")">@FormatDue(due)</time>
+                                }
+                                @if (t.Priority > 0)
+                                {
+                                    var name = TaskPanel.PriorityNames[Math.Clamp(t.Priority, 0, 3)];
+                                    <span class="prio prio-@t.Priority" data-testid="task-priority-@t.Id" role="img"
+                                          aria-label="Priority @name.ToLowerInvariant()" title="Priority @name.ToLowerInvariant()"></span>
+                                }
+                            </span>
+                            <button type="button" class="btn-icon btn-danger task-delete" data-testid="task-delete-@t.Id" @onclick:stopPropagation
+                                    aria-label="Delete task @t.Title" @onclick="() => DeleteTask(t)">
+                                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                            </button>
+                        </div>
+                    </Virtualize>
+                </div>
+            }
+        }
+    </main>
+
+    @if (RendererInfo.IsInteractive && OpenTaskItem is { } open)
+    {
+        <TaskPanel @key="open.Id" Task="open" OnSaved="ReplaceTask" OnClose="ClosePanel" />
+    }
+
+    @if (toast is { } current)
+    {
+        <div class="toast" data-testid="toast" role="status" @key="current">
+            <span>@current.Message</span>
+            <button type="button" data-testid="toast-undo" @onclick="() => UndoToast(current)">Undo</button>
+        </div>
+    }
+
+    @if (showHelp)
+    {
+        <div class="shortcut-help" data-testid="shortcut-help" role="dialog" aria-labelledby="shortcut-help-title">
+            <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+            <dl>
+                <dt><kbd>n</kbd></dt><dd>New task</dd>
+                <dt><kbd>/</kbd></dt><dd>Search</dd>
+                <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Highlight the next / previous task</dd>
+                <dt><kbd>x</kbd></dt><dd>Complete or reopen the highlighted task</dd>
+                <dt><kbd>Del</kbd></dt><dd>Delete the highlighted task</dd>
+                <dt><kbd>Enter</kbd></dt><dd>Open the highlighted task</dd>
+                <dt><kbd>Esc</kbd></dt><dd>Close the panel or clear the selection</dd>
+                <dt><kbd>?</kbd></dt><dd>Show or hide this help</dd>
+            </dl>
+            @* panel.js clicks this on Escape. *@
+            <button type="button" data-help-close @onclick="() => showHelp = false">Close</button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? ListId { get; set; }
+    [Parameter] public int? TaskId { get; set; }
+
+    private List<TaskList> lists = [];
+    private List<TaskItem> tasks = [];
+    private int? loadedListId;
+    private bool notFound;
+
+    private TaskList? CurrentList => lists.FirstOrDefault(l => l.Id == ListId);
+    private int OpenCount => tasks.Count(t => !t.Completed);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        lists = await Api.GetListsAsync();
+
+        if (ListId is null)
+        {
+            if (lists.Count > 0) Nav.NavigateTo($"lists/{lists[0].Id}", replace: true);
+            return;
+        }
+
+        if (loadedListId != ListId)
+        {
+            var loaded = await Api.GetTasksAsync(ListId.Value);
+            notFound = loaded is null;
+            tasks = loaded ?? [];
+            loadedListId = ListId;
+            pushedQueries.Clear();
+            selected.Clear();
+            highlightedId = null;
+            importError = null;
+        }
+
+        SyncSearchFromUrl();
+    }
+
+    // Sidebar list editing: add, inline rename, delete.
+    private bool adding;
+    private string newName = "";
+    private ElementReference addInput;
+    private int? renamingId;
+    private string renameText = "";
+    private bool focusAdd;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && RendererInfo.IsInteractive)
+        {
+            selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("taskReorder.register", selfRef);
+            await JS.InvokeVoidAsync("taskShortcuts.register", selfRef);
+        }
+        if (focusAdd && adding)
+        {
+            focusAdd = false;
+            await addInput.FocusAsync();
+        }
+    }
+
+    private void StartAdd()
+    {
+        adding = true;
+        newName = "";
+        focusAdd = true;
+    }
+
+    private async Task OnAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            adding = false;
+            return;
+        }
+        if (e.Key != "Enter") return;
+        var name = newName.Trim();
+        if (name.Length == 0) return;
+        adding = false;
+        newName = "";
+        var created = await Api.CreateListAsync(name);
+        lists = await Api.GetListsAsync();
+        Nav.NavigateTo($"lists/{created.Id}");
+    }
+
+    private void StartRename(TaskList l)
+    {
+        renamingId = l.Id;
+        renameText = l.Name;
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e, TaskList l)
+    {
+        if (e.Key == "Enter") await CommitRename(l);
+        else if (e.Key == "Escape") renamingId = null;
+    }
+
+    private async Task CommitRename(TaskList l)
+    {
+        if (renamingId != l.Id) return;
+        renamingId = null;
+        var name = renameText.Trim();
+        if (name.Length == 0 || name == l.Name) return;
+        var updated = await Api.RenameListAsync(l.Id, name);
+        // The lists may have been reloaded (navigation) since this handler captured `l`.
+        if (lists.FirstOrDefault(x => x.Id == updated.Id) is { } current) current.Name = updated.Name;
+    }
+
+    // Import: the chosen JSON file is posted to the API as is, then the new list is selected.
+    private const long MaxImportBytes = 10 * 1024 * 1024;
+    private string? importError;
+    private int importKey; // a fresh input after each import, so the same file can be chosen again
+
+    private async Task ImportFile(InputFileChangeEventArgs e)
+    {
+        importError = null;
+        importKey++;
+        string json;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(MaxImportBytes));
+            json = await reader.ReadToEndAsync();
+        }
+        catch (IOException)
+        {
+            importError = "The file is too large to import.";
+            return;
+        }
+        TaskList created;
+        try
+        {
+            created = await Api.ImportListAsync(json);
+        }
+        catch (HttpRequestException)
+        {
+            importError = $"Could not import {e.File.Name}: it is not a valid exported list.";
+            return;
+        }
+        lists = await Api.GetListsAsync();
+        Nav.NavigateTo($"lists/{created.Id}");
+    }
+
+    // Tasks: add, toggle, inline title edit, delete. Each change keeps the server's response.
+    private string newTaskTitle = "";
+    private int? editingTaskId;
+    private string editTitle = "";
+
+    private void ReplaceTask(TaskItem updated)
+    {
+        var i = tasks.FindIndex(x => x.Id == updated.Id);
+        if (i >= 0) tasks[i] = updated;
+    }
+
+    private async Task OnTaskAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || ListId is null) return;
+        var title = newTaskTitle.Trim();
+        newTaskTitle = "";
+        if (title.Length == 0) return;
+        var listId = ListId.Value;
+        var created = await Api.CreateTaskAsync(listId, title);
+        if (loadedListId == listId) tasks.Add(created);
+        lists = await Api.GetListsAsync();
+    }
+
+    // Completing a repeating task makes the API create the next occurrence; it joins the list at
+    // once, and the undo toast reopens the original and deletes that next task.
+    private async Task ToggleTask(TaskItem t)
+    {
+        if (t.Completed)
+        {
+            ReplaceTask(await Api.ReopenTaskAsync(t.Id));
+            lists = await Api.GetListsAsync();
+            return;
+        }
+        var listId = t.ListId;
+        var result = await Api.CompleteTaskAsync(t.Id);
+        ReplaceTask(result.Task);
+        if (result.Next is { } next && loadedListId == next.ListId && !tasks.Any(x => x.Id == next.Id))
+            tasks.Add(next);
+        lists = await Api.GetListsAsync();
+        if (result.Next is { } created)
+            ShowToast($"Completed \"{t.Title}\"", async () =>
+            {
+                await Api.DeleteTaskAsync(created.Id);
+                await Api.ReopenTaskAsync(t.Id);
+                await ReloadTasks(listId);
+            });
+    }
+
+    private void StartEditTask(TaskItem t)
+    {
+        editingTaskId = t.Id;
+        editTitle = t.Title;
+    }
+
+    private async Task OnEditTaskKey(KeyboardEventArgs e, TaskItem t)
+    {
+        if (e.Key == "Enter") await CommitEditTask(t);
+        else if (e.Key == "Escape") editingTaskId = null;
+    }
+
+    private async Task CommitEditTask(TaskItem t)
+    {
+        if (editingTaskId != t.Id) return;
+        editingTaskId = null;
+        var title = editTitle.Trim();
+        if (title.Length == 0 || title == t.Title) return;
+        ReplaceTask(await Api.RenameTaskAsync(t.Id, title));
+    }
+
+    private async Task DeleteTask(TaskItem t)
+    {
+        await Api.DeleteTaskAsync(t.Id);
+        tasks.RemoveAll(x => x.Id == t.Id);
+        lists = await Api.GetListsAsync();
+        ShowToast($"Deleted \"{t.Title}\"", async () =>
+        {
+            await Api.RestoreTaskAsync(t.Id);
+            await ReloadTasks(t.ListId);
+        });
+    }
+
+    // Undo toast: one at a time (a new action replaces it), hidden after five seconds.
+    private sealed record Toast(string Message, Func<Task> Undo);
+
+    private Toast? toast;
+    private CancellationTokenSource? toastTimer;
+
+    private void ShowToast(string message, Func<Task> undo)
+    {
+        toastTimer?.Cancel();
+        var shown = new Toast(message, undo);
+        toast = shown;
+        var cts = toastTimer = new CancellationTokenSource();
+        _ = HideToastLater(shown, cts.Token);
+    }
+
+    private async Task HideToastLater(Toast shown, CancellationToken token)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(5), token); }
+        catch (OperationCanceledException) { return; }
+        await InvokeAsync(() =>
+        {
+            if (toast != shown) return;
+            toast = null;
+            StateHasChanged();
+        });
+    }
+
+    private async Task UndoToast(Toast shown)
+    {
+        if (toast != shown) return;
+        toastTimer?.Cancel();
+        toast = null;
+        await shown.Undo();
+    }
+
+    private async Task ReloadTasks(int listId)
+    {
+        if (loadedListId == listId && await Api.GetTasksAsync(listId) is { } reloaded) tasks = reloaded;
+        lists = await Api.GetListsAsync();
+    }
+
+    // Detail panel: the open task is the one in the route.
+    private TaskItem? OpenTaskItem => TaskId is null ? null : tasks.FirstOrDefault(t => t.Id == TaskId);
+
+    private string Query => new Uri(Nav.Uri).Query;
+
+    private void OpenTask(TaskItem t)
+    {
+        if (editingTaskId == t.Id) return;
+        Nav.NavigateTo($"lists/{t.ListId}/tasks/{t.Id}{Query}");
+    }
+
+    private void ClosePanel() => Nav.NavigateTo($"lists/{ListId}{Query}");
+
+    // Filters: ?view= selects one; All (the default) shows open tasks only.
+    [SupplyParameterFromQuery(Name = "view")] public string? View { get; set; }
+
+    private static readonly (string View, string Label)[] Views =
+        [("all", "All"), ("today", "Today"), ("upcoming", "Upcoming"), ("overdue", "Overdue"), ("completed", "Completed")];
+
+    private string CurrentView => Views.Any(v => v.View == View) ? View! : "all";
+
+    private static bool InView(TaskItem t, string view)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return view switch
+        {
+            "today" => t.DueDate == today,
+            "upcoming" => t.DueDate > today,
+            "overdue" => !t.Completed && t.DueDate < today,
+            "completed" => t.Completed,
+            _ => !t.Completed,
+        };
+    }
+
+    private void SetView(string view) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("view", view == "all" ? null : view));
+
+    // Search: ?q= matches title, notes and tags, case-insensitive. The rows are filtered on every
+    // keystroke with no debounce on purpose: the comparison measures rendering, not input throttling.
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+
+    private string searchText = "";
+
+    // Values this page wrote to ?q= itself. Their location-changed callbacks can arrive after the
+    // next keystroke, so they must not overwrite the input; any other ?q= (a link, a reload) does.
+    private readonly HashSet<string> pushedQueries = [];
+
+    private void SyncSearchFromUrl()
+    {
+        var q = Q ?? "";
+        if (pushedQueries.Contains(q)) return;
+        pushedQueries.Clear();
+        searchText = q;
+    }
+
+    private void SetSearch(string? value)
+    {
+        searchText = value ?? "";
+        pushedQueries.Add(searchText);
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", searchText.Length == 0 ? null : searchText), replace: true);
+    }
+
+    private static bool Matches(TaskItem t, string q)
+    {
+        q = q.Trim();
+        if (q.Length == 0) return true;
+        return t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || t.Notes.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || t.Tags.Any(tag => tag.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Sort: ?sort= picks the order; manual (the default) is the list's position order.
+    [SupplyParameterFromQuery(Name = "sort")] public string? Sort { get; set; }
+
+    private static readonly (string Sort, string Label)[] Sorts =
+        [("manual", "Manual"), ("due", "Due date"), ("priority", "Priority"), ("title", "Title"), ("created", "Created")];
+
+    private string CurrentSort => Sorts.Any(s => s.Sort == Sort) ? Sort! : "manual";
+
+    private void SetSort(string? sort) =>
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("sort", sort is null or "manual" ? null : sort));
+
+    // Ties fall back to the manual order so every sort is stable and deterministic.
+    private IEnumerable<TaskItem> Sorted(IEnumerable<TaskItem> items) => CurrentSort switch
+    {
+        "due" => items.OrderBy(t => t.DueDate is null).ThenBy(t => t.DueDate).ThenBy(t => t.Position),
+        "priority" => items.OrderByDescending(t => t.Priority).ThenBy(t => t.Position),
+        "title" => items.OrderBy(t => t.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(t => t.Position),
+        "created" => items.OrderBy(t => t.CreatedAt).ThenBy(t => t.Id),
+        _ => items.OrderBy(t => t.Position).ThenBy(t => t.Id),
+    };
+
+    // Bulk actions: the selection is a set of task ids; every action goes through POST /api/tasks/bulk,
+    // then the list is reloaded from the server and the selection cleared.
+    private readonly HashSet<int> selected = [];
+    private int? bulkTarget;
+
+    private void ToggleSelected(int id)
+    {
+        if (!selected.Remove(id)) selected.Add(id);
+    }
+
+    private void ToggleSelectAll(List<TaskItem> visible)
+    {
+        if (visible.Count > 0 && visible.All(t => selected.Contains(t.Id))) selected.Clear();
+        else selected.UnionWith(visible.Select(t => t.Id));
+    }
+
+    private void ClearSelection() => selected.Clear();
+
+    private int MoveTarget(List<TaskList> targets) =>
+        targets.Any(l => l.Id == bulkTarget) ? bulkTarget!.Value : targets[0].Id;
+
+    private Task BulkComplete() => RunBulk("complete");
+    private Task BulkDelete() => RunBulk("delete");
+    private Task BulkMove(int targetListId) => RunBulk("move", targetListId);
+
+    private async Task RunBulk(string action, int? targetListId = null)
+    {
+        if (selected.Count == 0 || ListId is null) return;
+        var listId = ListId.Value;
+        var ids = selected.ToList();
+        // Only the tasks this action changes are reverted by its undo.
+        var wereOpen = tasks.Where(t => ids.Contains(t.Id) && !t.Completed).Select(t => t.Id).ToList();
+        selected.Clear();
+        await Api.BulkAsync(ids, action, targetListId);
+        await ReloadTasks(listId);
+        if (action == "delete")
+            ShowToast($"Deleted {ids.Count} {(ids.Count == 1 ? "task" : "tasks")}", async () =>
+            {
+                await Api.BulkAsync(ids, "restore");
+                await ReloadTasks(listId);
+            });
+        else if (action == "complete" && wereOpen.Count > 0)
+            ShowToast($"Completed {wereOpen.Count} {(wereOpen.Count == 1 ? "task" : "tasks")}", async () =>
+            {
+                await Api.BulkAsync(wereOpen, "reopen");
+                await ReloadTasks(listId);
+            });
+    }
+
+    private string? RowClass(TaskItem t)
+    {
+        var c = new List<string>();
+        if (t.Completed) c.Add("completed");
+        if (selected.Contains(t.Id)) c.Add("selected");
+        if (!t.Completed && t.DueDate < DateOnly.FromDateTime(DateTime.Today)) c.Add("overdue");
+        if (t.Id == TaskId) c.Add("open");
+        if (t.Id == highlightedId) c.Add("highlighted");
+        return c.Count == 0 ? null : string.Join(' ', c);
+    }
+
+    private static string FormatDue(DateOnly due)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (due == today) return "Today";
+        if (due == today.AddDays(1)) return "Tomorrow";
+        return due.Year == today.Year ? due.ToString("MMM d") : due.ToString("MMM d, yyyy");
+    }
+
+    // Drag-and-drop reorder (manual sort only): reorder.js reports the drop. The whole list
+    // (completed tasks included) is renumbered locally and sent to the API in its new order.
+    private DotNetObjectReference<Home>? selfRef;
+
+    [JSInvokable]
+    public async Task MoveTask(int fromId, int toId, bool after)
+    {
+        if (CurrentSort != "manual" || ListId is null || loadedListId != ListId) return;
+        var order = tasks.OrderBy(t => t.Position).ThenBy(t => t.Id).ToList();
+        var moved = order.Find(t => t.Id == fromId);
+        if (moved is null || !order.Any(t => t.Id == toId)) return;
+        order.Remove(moved);
+        var target = order.FindIndex(t => t.Id == toId);
+        order.Insert(after ? target + 1 : target, moved);
+        for (var i = 0; i < order.Count; i++) order[i].Position = i;
+        StateHasChanged();
+        await Api.ReorderTasksAsync(ListId.Value, order.Select(t => t.Id).ToList());
+    }
+
+    private List<TaskItem> VisibleTasks() =>
+        Sorted(tasks.Where(t => InView(t, CurrentView) && Matches(t, searchText))).ToList();
+
+    // Keyboard shortcuts: shortcuts.js sends the keys that change state (n and / only move focus
+    // and stay in the browser). The highlight is a cursor over the visible rows.
+    private int? highlightedId;
+    private bool showHelp;
+
+    [JSInvokable]
+    public async Task Shortcut(string key)
+    {
+        if (key == "?")
+        {
+            showHelp = !showHelp;
+            StateHasChanged();
+            return;
+        }
+        if (!RendererInfo.IsInteractive || notFound) return;
+
+        var visible = VisibleTasks();
+        var index = visible.FindIndex(t => t.Id == highlightedId);
+        var current = index >= 0 ? visible[index] : null;
+        switch (key)
+        {
+            case "j":
+                if (visible.Count > 0) highlightedId = visible[Math.Min(index + 1, visible.Count - 1)].Id;
+                break;
+            case "k":
+                if (visible.Count > 0) highlightedId = visible[index < 0 ? visible.Count - 1 : Math.Max(index - 1, 0)].Id;
+                break;
+            case "x" when current is not null:
+                await ToggleTask(current);
+                break;
+            case "Delete" when current is not null:
+                // The highlight moves to the row that takes the deleted one's place.
+                var next = visible.ElementAtOrDefault(index + 1) ?? visible.ElementAtOrDefault(index - 1);
+                await DeleteTask(current);
+                highlightedId = next?.Id;
+                break;
+            case "Enter" when current is not null:
+                OpenTask(current);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        toastTimer?.Cancel();
+        if (selfRef is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("taskReorder.unregister", selfRef);
+            await JS.InvokeVoidAsync("taskShortcuts.unregister", selfRef);
+        }
+        catch (JSDisconnectedException) { }
+        selfRef.Dispose();
+    }
+
+    private async Task DeleteList(TaskList l)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete the list \"{l.Name}\" and its tasks?")) return;
+        await Api.DeleteListAsync(l.Id);
+        lists = await Api.GetListsAsync();
+        if (l.Id == ListId)
+        {
+            loadedListId = null;
+            Nav.NavigateTo(lists.Count > 0 ? $"lists/{lists[0].Id}" : "", replace: true);
+        }
+        ShowToast($"Deleted list \"{l.Name}\"", async () =>
+        {
+            await Api.RestoreListAsync(l.Id);
+            lists = await Api.GetListsAsync();
+            Nav.NavigateTo($"lists/{l.Id}");
+        });
+    }
+}

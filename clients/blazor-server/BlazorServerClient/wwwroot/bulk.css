@@ -1,0 +1,3 @@
+/* Bulk selection: the select-all control above the rows. */
+.select-all-row { margin: 0 16px 8px; padding: 0 8px; font-size: 13px; color: var(--text-muted); }
+.select-all-row label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }

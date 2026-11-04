@@ -1,0 +1,5 @@
+/* Detail panel fields (the shared stylesheet styles the panel itself). */
+.panel .field { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; }
+.panel .field > label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.panel textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.task-row { cursor: pointer; }
