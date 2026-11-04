@@ -70,4 +70,6 @@ export const api = {
   completeTask: (id: number) => send<{ task: TaskItem; next: TaskItem | null }>('POST', `/api/tasks/${id}/complete`),
   reopenTask: (id: number) => send<TaskItem>('POST', `/api/tasks/${id}/reopen`),
   deleteTask: (id: number) => send<void>('DELETE', `/api/tasks/${id}`),
+  reorderTasks: (listId: number, orderedIds: number[]) =>
+    send<void>('POST', '/api/tasks/reorder', { listId, orderedIds }),
 }

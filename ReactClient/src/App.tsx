@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type DragEvent, type SetStateAction } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from 'react-router'
 import { api, type Repeat, type TaskChanges, type TaskItem, type TaskList } from './api'
 
@@ -269,6 +269,35 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     adjustCounts(-1, task.completed ? 0 : -1)
   }
 
+  // Drag-and-drop reorder, hand-rolled on the native HTML5 drag events (no library).
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [dropAt, setDropAt] = useState<DropAt | null>(null)
+
+  function endDrag() {
+    setDragId(null)
+    setDropAt(null)
+  }
+
+  /** Moves the dragged task next to the target in the full list (hidden tasks keep their places). */
+  async function dropTask(target: DropAt) {
+    const fromId = dragId
+    endDrag()
+    if (!tasks || fromId === null || fromId === target.id) return
+    const moved = tasks.find((t) => t.id === fromId)
+    if (!moved) return
+    const rest = tasks.filter((t) => t.id !== fromId)
+    const at = rest.findIndex((t) => t.id === target.id) + (target.where === 'after' ? 1 : 0)
+    const next = [...rest.slice(0, at), moved, ...rest.slice(at)]
+    if (next.every((t, i) => t === tasks[i])) return
+    setTasks(() => next)
+    try {
+      await api.reorderTasks(listId, next.map((t) => t.id))
+    } catch {
+      // Fall back to the server's order when the reorder is rejected.
+      setLoaded({ listId, tasks: await api.tasks(listId) })
+    }
+  }
+
   useEffect(() => {
     const ctrl = new AbortController()
     api
@@ -404,6 +433,20 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
             key={t.id}
             task={t}
             isOpen={t.id === openId}
+            drag={
+              sort === 'manual'
+                ? {
+                    dragging: t.id === dragId,
+                    dropAt: dropAt?.id === t.id ? dropAt.where : null,
+                    onStart: () => setDragId(t.id),
+                    onOver: (where) => {
+                      if (dropAt?.id !== t.id || dropAt.where !== where) setDropAt({ id: t.id, where })
+                    },
+                    onDrop: (where) => void dropTask({ id: t.id, where }),
+                    onEnd: endDrag,
+                  }
+                : null
+            }
             onOpen={() => openTask(t.id)}
             onToggle={() => void toggleTask(t)}
             onRename={(title) => void renameTask(t, title)}
@@ -425,26 +468,83 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   )
 }
 
+type DropWhere = 'before' | 'after'
+type DropAt = { id: number; where: DropWhere }
+
+/** Drag state and callbacks of a row; null outside the manual sort, which hides the handle. */
+type RowDrag = {
+  dragging: boolean
+  dropAt: DropWhere | null
+  onStart: () => void
+  onOver: (where: DropWhere) => void
+  onDrop: (where: DropWhere) => void
+  onEnd: () => void
+}
+
+/** The upper half of a row drops before it, the lower half after it. */
+function dropWhere(e: DragEvent<HTMLElement>): DropWhere {
+  const r = e.currentTarget.getBoundingClientRect()
+  return e.clientY < r.top + r.height / 2 ? 'before' : 'after'
+}
+
 function TaskRow(props: {
   task: TaskItem
   isOpen: boolean
+  drag: RowDrag | null
   onOpen: () => void
   onToggle: () => void
   onRename: (title: string) => void
   onDelete: () => void
 }) {
-  const { task } = props
+  const { task, drag } = props
   const [editing, setEditing] = useState(false)
 
   return (
     <div
-      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}`}
+      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}${drag?.dragging ? ' dragging' : ''}${drag?.dropAt ? ` drop-${drag.dropAt}` : ''}`}
       data-testid={`task-row-${task.id}`}
       onClick={(e) => {
         // Clicks on the row's own controls (checkbox, delete, title editor) do not open the panel.
-        if (!(e.target as HTMLElement).closest('input, button, select, textarea')) props.onOpen()
+        if (!(e.target as HTMLElement).closest('input, button, select, textarea, .drag-handle')) props.onOpen()
       }}
+      onDragOver={
+        drag
+          ? (e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              drag.onOver(dropWhere(e))
+            }
+          : undefined
+      }
+      onDrop={
+        drag
+          ? (e) => {
+              e.preventDefault()
+              drag.onDrop(dropWhere(e))
+            }
+          : undefined
+      }
     >
+      {drag && (
+        <span
+          className="drag-handle"
+          data-testid={`drag-handle-${task.id}`}
+          draggable
+          role="img"
+          aria-label={`Drag to reorder ${task.title}`}
+          title="Drag to reorder"
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData('text/plain', String(task.id))
+            const row = e.currentTarget.closest('.task-row')
+            if (row) e.dataTransfer.setDragImage(row, 16, 20)
+            drag.onStart()
+          }}
+          onDragEnd={drag.onEnd}
+        >
+          <Icon name="i-drag" />
+        </span>
+      )}
       <input
         type="checkbox"
         className="task-check"
