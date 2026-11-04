@@ -285,6 +285,19 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   const open = tasks?.filter((t) => !t.completed).length ?? 0
   const openTaskItem = tasks?.find((t) => t.id === openId)
 
+  const params = new URLSearchParams(search)
+  const view = parseView(params.get('view'))
+  const today = todayIso()
+  const visible = tasks?.filter((t) => VIEWS[view].test(t, today)) ?? null
+
+  function selectView(next: View) {
+    const p = new URLSearchParams(search)
+    if (next === 'all') p.delete('view')
+    else p.set('view', next)
+    const qs = p.toString()
+    navigate({ search: qs ? `?${qs}` : '' })
+  }
+
   return (
     <>
     <main className="main">
@@ -314,8 +327,24 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
           disabled={!tasks}
         />
       </form>
+      <div className="toolbar">
+        <div className="filter-bar" role="group" aria-label="Filter tasks">
+          {VIEW_ORDER.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={`filter${v === view ? ' active' : ''}`}
+              aria-pressed={v === view}
+              data-testid={`filter-${v}`}
+              onClick={() => selectView(v)}
+            >
+              {VIEWS[v].label} <span className="count">{tasks ? tasks.filter((t) => VIEWS[v].test(t, today)).length : ''}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="rows-container" data-testid="rows-container">
-        {tasks?.map((t) => (
+        {visible?.map((t) => (
           <TaskRow
             key={t.id}
             task={t}
@@ -326,7 +355,7 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
             onDelete={() => void deleteTask(t)}
           />
         ))}
-        {tasks?.length === 0 && <p className="empty-state">Nothing here</p>}
+        {visible?.length === 0 && <p className="empty-state">Nothing here</p>}
       </div>
     </main>
     {openTaskItem && (
@@ -432,6 +461,22 @@ const REPEATS: { value: Repeat; label: string }[] = [
 function todayIso(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+type View = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed'
+
+/** The ?view= filters; `today` is yyyy-MM-dd, so plain string comparison orders the dates. */
+const VIEWS: Record<View, { label: string; test: (t: TaskItem, today: string) => boolean }> = {
+  all: { label: 'All', test: (t) => !t.completed },
+  today: { label: 'Today', test: (t, today) => t.dueDate === today },
+  upcoming: { label: 'Upcoming', test: (t, today) => t.dueDate !== null && t.dueDate > today },
+  overdue: { label: 'Overdue', test: (t, today) => !t.completed && t.dueDate !== null && t.dueDate < today },
+  completed: { label: 'Completed', test: (t) => t.completed },
+}
+const VIEW_ORDER = Object.keys(VIEWS) as View[]
+
+function parseView(value: string | null): View {
+  return VIEW_ORDER.includes(value as View) ? (value as View) : 'all'
 }
 
 function isOverdue(task: TaskItem): boolean {
