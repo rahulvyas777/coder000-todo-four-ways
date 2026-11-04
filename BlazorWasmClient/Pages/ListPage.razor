@@ -160,6 +160,25 @@
     }
 </div>
 
+@if (_showHelp)
+{
+    @* Non-modal, so the document-level keys keep working: ? or Escape closes it. *@
+    <dialog open class="shortcut-help" data-testid="shortcut-help" aria-labelledby="shortcut-help-title">
+        <h2 id="shortcut-help-title">Keyboard shortcuts</h2>
+        <dl>
+            <dt><kbd>n</kbd></dt><dd>New task</dd>
+            <dt><kbd>/</kbd></dt><dd>Search</dd>
+            <dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Highlight the next / previous task</dd>
+            <dt><kbd>x</kbd></dt><dd>Complete or reopen the highlighted task</dd>
+            <dt><kbd>Del</kbd></dt><dd>Delete the highlighted task</dd>
+            <dt><kbd>Enter</kbd></dt><dd>Open the highlighted task</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Close the panel or clear the selection</dd>
+            <dt><kbd>?</kbd></dt><dd>Show or hide this help</dd>
+        </dl>
+        <p>Shortcuts are ignored while typing in a field.</p>
+    </dialog>
+}
+
 @if (PanelTask is { } pt)
 {
     <SectionContent SectionName="task-panel">
@@ -267,6 +286,7 @@
         _tasks = null;
         _error = null;
         _selected.Clear();
+        _highlightId = null;
         // A slower response for a list the user already left must not overwrite the new one.
         var version = ++_loadVersion;
         try
@@ -533,6 +553,7 @@
         if (task.Id == TaskId) css += " open";
         if (task.Id == _draggingId) css += " dragging";
         if (_selected.Contains(task.Id)) css += " selected";
+        if (task.Id == _highlightId) css += " highlighted";
         return css;
     }
 
@@ -591,11 +612,57 @@
 
     private void ClosePanel() => Nav.NavigateTo($"lists/{ListId}{Query}");
 
-    /// <summary>Escape closes the panel first; with the panel closed it clears the selection.</summary>
+    // ---- Keyboard shortcuts (keys.js forwards them; it ignores keys typed into a field) ----
+
+    private int? _highlightId;
+    private bool _showHelp;
+
+    [JSInvokable]
+    public async Task OnShortcut(string key)
+    {
+        if (key == "?")
+        {
+            _showHelp = !_showHelp;
+            StateHasChanged();
+            return;
+        }
+        var rows = VisibleTasks();
+        var index = rows.FindIndex(t => t.Id == _highlightId);
+        switch (key)
+        {
+            case "j" or "k" when rows.Count > 0:
+                // With nothing highlighted j starts at the first row and k at the last.
+                index = index < 0 ? (key == "j" ? 0 : rows.Count - 1)
+                    : Math.Clamp(index + (key == "j" ? 1 : -1), 0, rows.Count - 1);
+                _highlightId = rows[index].Id;
+                StateHasChanged();
+                break;
+            case "x" when index >= 0:
+                await ToggleTask(rows[index]);
+                StateHasChanged();
+                break;
+            case "Delete" when index >= 0:
+                // The highlight moves to the next row (or the previous one at the end).
+                _highlightId = rows.Count > 1 ? rows[index < rows.Count - 1 ? index + 1 : index - 1].Id : null;
+                await DeleteTask(rows[index]);
+                StateHasChanged();
+                break;
+            case "Enter" when index >= 0:
+                OpenTask(rows[index]);
+                break;
+        }
+    }
+
+    /// <summary>Escape closes the help, then the panel; with both closed it clears the selection.</summary>
     [JSInvokable]
     public void OnEscape()
     {
-        if (TaskId is not null) ClosePanel();
+        if (_showHelp)
+        {
+            _showHelp = false;
+            StateHasChanged();
+        }
+        else if (TaskId is not null) ClosePanel();
         else if (_selected.Count > 0)
         {
             _selected.Clear();
