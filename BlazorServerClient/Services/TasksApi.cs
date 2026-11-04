@@ -127,6 +127,14 @@ public sealed class TasksApi(HttpClient http)
         res.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Applies one action (complete, reopen, delete, restore, move) to many tasks; returns the affected count.</summary>
+    public async Task<int> BulkAsync(IReadOnlyCollection<int> ids, string action, int? targetListId = null)
+    {
+        using var res = await http.PostAsJsonAsync("api/tasks/bulk", new { ids, action, targetListId });
+        res.EnsureSuccessStatusCode();
+        return (await res.Content.ReadFromJsonAsync<BulkResult>())!.Affected;
+    }
+
     public async Task<Subtask> AddSubtaskAsync(int taskId, string title)
     {
         using var res = await http.PostAsJsonAsync($"api/tasks/{taskId}/subtasks", new { title });
@@ -152,4 +160,9 @@ public sealed class CompleteResult
 {
     public TaskItem Task { get; set; } = new();
     public TaskItem? Next { get; set; }
+}
+
+public sealed class BulkResult
+{
+    public int Affected { get; set; }
 }

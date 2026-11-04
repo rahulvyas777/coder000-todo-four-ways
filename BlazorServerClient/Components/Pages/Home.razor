@@ -107,6 +107,36 @@
                     </div>
                 </div>
                 var visible = Sorted(tasks.Where(t => InView(t, CurrentView) && Matches(t, searchText))).ToList();
+                var allSelected = visible.Count > 0 && visible.All(t => selected.Contains(t.Id));
+                <div class="select-all-row">
+                    <label>
+                        <input type="checkbox" class="select-check" data-testid="select-all" checked="@allSelected"
+                               @onchange="() => ToggleSelectAll(visible)" />
+                        Select all
+                    </label>
+                </div>
+                @if (selected.Count > 0)
+                {
+                    var targets = lists.Where(l => l.Id != ListId).ToList();
+                    <div class="bulk-bar" data-testid="bulk-bar" role="region" aria-label="Bulk actions">
+                        <span class="bulk-count" data-testid="bulk-count">@selected.Count selected</span>
+                        <button type="button" data-testid="bulk-complete" @onclick="BulkComplete">Complete</button>
+                        <button type="button" class="btn-danger" data-testid="bulk-delete" @onclick="BulkDelete">Delete</button>
+                        @if (targets.Count > 0)
+                        {
+                            <select data-testid="bulk-move-target" aria-label="Move to list"
+                                    @bind:get="MoveTarget(targets)" @bind:set="v => bulkTarget = v">
+                                @foreach (var l in targets)
+                                {
+                                    <option value="@l.Id">@l.Name</option>
+                                }
+                            </select>
+                            <button type="button" data-testid="bulk-move" @onclick="() => BulkMove(MoveTarget(targets))">Move</button>
+                        }
+                        @* panel.js clicks this on Escape. *@
+                        <button type="button" data-bulk-clear @onclick="ClearSelection">Clear selection</button>
+                    </div>
+                }
                 <div class="rows-container" data-testid="rows-container" role="list" aria-label="Tasks">
                     @if (visible.Count == 0)
                     {
@@ -124,6 +154,8 @@
                                     <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
                                 </button>
                             }
+                            <input type="checkbox" class="select-check" data-testid="select-check-@t.Id" @onclick:stopPropagation
+                                   checked="@selected.Contains(t.Id)" @onchange="() => ToggleSelected(t.Id)" aria-label="Select: @t.Title" />
                             <input type="checkbox" class="task-check" data-testid="task-check-@t.Id" @onclick:stopPropagation
                                    checked="@t.Completed" @onchange="() => ToggleTask(t)" aria-label="Completed: @t.Title" />
                             @* Same inline editor as the list rename (inline-edit.js opens it on the double-click). *@
@@ -206,6 +238,7 @@
             tasks = loaded ?? [];
             loadedListId = ListId;
             pushedQueries.Clear();
+            selected.Clear();
         }
 
         SyncSearchFromUrl();
@@ -432,10 +465,48 @@
         _ => items.OrderBy(t => t.Position).ThenBy(t => t.Id),
     };
 
+    // Bulk actions: the selection is a set of task ids; every action goes through POST /api/tasks/bulk,
+    // then the list is reloaded from the server and the selection cleared.
+    private readonly HashSet<int> selected = [];
+    private int? bulkTarget;
+
+    private void ToggleSelected(int id)
+    {
+        if (!selected.Remove(id)) selected.Add(id);
+    }
+
+    private void ToggleSelectAll(List<TaskItem> visible)
+    {
+        if (visible.Count > 0 && visible.All(t => selected.Contains(t.Id))) selected.Clear();
+        else selected.UnionWith(visible.Select(t => t.Id));
+    }
+
+    private void ClearSelection() => selected.Clear();
+
+    private int MoveTarget(List<TaskList> targets) =>
+        targets.Any(l => l.Id == bulkTarget) ? bulkTarget!.Value : targets[0].Id;
+
+    private Task BulkComplete() => RunBulk("complete");
+    private Task BulkDelete() => RunBulk("delete");
+    private Task BulkMove(int targetListId) => RunBulk("move", targetListId);
+
+    private async Task RunBulk(string action, int? targetListId = null)
+    {
+        if (selected.Count == 0 || ListId is null) return;
+        var listId = ListId.Value;
+        var ids = selected.ToList();
+        selected.Clear();
+        await Api.BulkAsync(ids, action, targetListId);
+        var reloaded = await Api.GetTasksAsync(listId);
+        if (loadedListId == listId && reloaded is not null) tasks = reloaded;
+        lists = await Api.GetListsAsync();
+    }
+
     private string? RowClass(TaskItem t)
     {
         var c = new List<string>();
         if (t.Completed) c.Add("completed");
+        if (selected.Contains(t.Id)) c.Add("selected");
         if (!t.Completed && t.DueDate < DateOnly.FromDateTime(DateTime.Today)) c.Add("overdue");
         if (t.Id == TaskId) c.Add("open");
         return c.Count == 0 ? null : string.Join(' ', c);
