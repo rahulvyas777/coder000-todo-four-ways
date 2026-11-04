@@ -2,32 +2,83 @@
 @implements IDisposable
 @inject AppState State
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <aside class="sidebar" aria-label="Lists">
     <div class="sidebar-head">
         <h1 class="app-title" data-testid="app-title">Tasks</h1>
+        <div class="sidebar-tools">
+            <button type="button" class="btn-icon" data-testid="list-add" aria-label="Add list"
+                    aria-expanded="@(_adding ? "true" : "false")" @onclick="StartAdd">
+                <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus" /></svg>
+            </button>
+        </div>
     </div>
     @if (State.Error is not null)
     {
         <p class="empty-state" role="alert">@State.Error</p>
     }
+    @if (_actionError is not null)
+    {
+        <p class="empty-state" role="alert">@_actionError</p>
+    }
     <ul class="list-nav" data-testid="list-nav">
         @foreach (var list in State.Lists)
         {
             var active = list.Id == _activeListId;
-            <li class="list-item @(active ? "active" : null)" data-testid="list-item-@list.Id">
-                <a href="lists/@list.Id" aria-current="@(active ? "page" : null)">
-                    <span>@list.Name</span>
-                    <span class="list-count" data-testid="list-count-@list.Id"
-                          aria-label="@($"{list.OpenCount} open")">@list.OpenCount</span>
-                </a>
+            <li class="list-item @(active ? "active" : null)" data-testid="list-item-@list.Id" @key="list.Id">
+                @if (_renamingId == list.Id)
+                {
+                    <input type="text" @ref="_renameInput" @bind="_renameText" @bind:event="oninput" maxlength="80"
+                           aria-label="@($"Rename list {list.Name}")"
+                           @onkeydown="e => OnRenameKey(e, list.Id)" @onblur="() => CommitRename(list.Id)" />
+                }
+                else
+                {
+                    <a href="lists/@list.Id" aria-current="@(active ? "page" : null)"
+                       @ondblclick="() => StartRename(list)">
+                        <span>@list.Name</span>
+                        <span class="list-count" data-testid="list-count-@list.Id"
+                              aria-label="@($"{list.OpenCount} open")">@list.OpenCount</span>
+                    </a>
+                    <span class="list-actions">
+                        <button type="button" class="btn-icon" data-testid="list-rename-@list.Id"
+                                aria-label="@($"Rename {list.Name}")" @onclick="() => StartRename(list)">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-edit" /></svg>
+                        </button>
+                        <button type="button" class="btn-icon btn-danger" data-testid="list-delete-@list.Id"
+                                aria-label="@($"Delete {list.Name}")" @onclick="() => DeleteList(list)">
+                            <svg class="icon" aria-hidden="true"><use href="icons.svg#i-trash" /></svg>
+                        </button>
+                    </span>
+                }
             </li>
         }
     </ul>
+    @if (_adding)
+    {
+        <div class="list-add-row">
+            <input type="text" @ref="_addInput" @bind="_newName" @bind:event="oninput" maxlength="80"
+                   placeholder="New list" aria-label="New list name" data-testid="list-name-input"
+                   @onkeydown="OnAddKey" />
+        </div>
+    }
 </aside>
 
 @code {
     private int? _activeListId;
+
+    private bool _adding;
+    private string _newName = "";
+    private ElementReference _addInput;
+
+    private int? _renamingId;
+    private string _renameText = "";
+    private ElementReference _renameInput;
+
+    private enum Focus { None, Add, Rename }
+    private Focus _pendingFocus;
+    private string? _actionError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -37,10 +88,97 @@
         await State.EnsureListsAsync();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Inline editors take focus once they are in the DOM (refs are set by that render).
+        var pending = _pendingFocus;
+        _pendingFocus = Focus.None;
+        if (pending == Focus.Add) await _addInput.FocusAsync();
+        else if (pending == Focus.Rename && _renamingId is not null) await _renameInput.FocusAsync();
+    }
+
     private static int? ListIdFromUri(string uri)
     {
         var m = Regex.Match(uri, @"/lists/(\d+)");
         return m.Success ? int.Parse(m.Groups[1].Value) : null;
+    }
+
+    private void StartAdd()
+    {
+        _adding = true;
+        _newName = "";
+        _pendingFocus = Focus.Add;
+    }
+
+    private async Task OnAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            _adding = false;
+            return;
+        }
+        if (e.Key != "Enter") return;
+        var name = _newName.Trim();
+        if (name.Length == 0) return;
+        await Run(async () =>
+        {
+            var list = await State.AddListAsync(name);
+            _adding = false;
+            _newName = "";
+            Nav.NavigateTo($"lists/{list.Id}");
+        });
+    }
+
+    private void StartRename(TaskList list)
+    {
+        _renamingId = list.Id;
+        _renameText = list.Name;
+        _pendingFocus = Focus.Rename;
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e, int id)
+    {
+        if (e.Key == "Escape") _renamingId = null;
+        else if (e.Key == "Enter") await CommitRename(id);
+    }
+
+    private async Task CommitRename(int id)
+    {
+        // Enter commits, and the blur that follows when the input goes away must not commit twice.
+        if (_renamingId != id) return;
+        _renamingId = null;
+        var name = _renameText.Trim();
+        var current = State.FindList(id);
+        if (name.Length == 0 || current is null || current.Name == name) return;
+        current.Name = name;
+        await Run(() => State.RenameListAsync(id, name));
+    }
+
+    private async Task DeleteList(TaskList list)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete the list \"{list.Name}\" and its tasks?")) return;
+        await Run(async () =>
+        {
+            await State.DeleteListAsync(list.Id);
+            if (_activeListId == list.Id)
+            {
+                Nav.NavigateTo(State.Lists.Count > 0 ? $"lists/{State.Lists[0].Id}" : "", replace: true);
+            }
+        });
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        try
+        {
+            _actionError = null;
+            await action();
+        }
+        catch (HttpRequestException ex)
+        {
+            _actionError = $"The change was not saved: {ex.Message}";
+            await State.ReloadListsAsync();
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)

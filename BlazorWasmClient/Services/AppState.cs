@@ -30,4 +30,24 @@ public sealed class AppState(ApiClient api)
     }
 
     public TaskList? FindList(int id) => Lists.FirstOrDefault(l => l.Id == id);
+
+    // Each change goes through the API, then the lists (and their counts) are re-read from it.
+    public async Task<TaskList> AddListAsync(string name)
+    {
+        var list = await api.CreateListAsync(name);
+        await ReloadListsAsync();
+        return list;
+    }
+
+    public async Task RenameListAsync(int id, string name)
+    {
+        await api.RenameListAsync(id, name);
+        await ReloadListsAsync();
+    }
+
+    public async Task DeleteListAsync(int id)
+    {
+        await api.DeleteListAsync(id);
+        await ReloadListsAsync();
+    }
 }
