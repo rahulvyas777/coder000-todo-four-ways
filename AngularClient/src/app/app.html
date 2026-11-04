@@ -6,6 +6,18 @@
         <button
           type="button"
           class="btn-icon"
+          data-testid="theme-toggle"
+          [attr.aria-label]="themes.theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+          [attr.title]="themes.theme() === 'dark' ? 'Light theme' : 'Dark theme'"
+          (click)="themes.toggle()"
+        >
+          <svg class="icon" aria-hidden="true">
+            <use [attr.href]="themes.theme() === 'dark' ? 'icons.svg#i-sun' : 'icons.svg#i-moon'" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
           data-testid="list-add"
           aria-label="Add list"
           title="Add list"

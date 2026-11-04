@@ -4,6 +4,7 @@ import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router
 import { filter, map } from 'rxjs';
 import { Autofocus } from './autofocus';
 import { ListsStore } from './lists-store';
+import { ThemeService } from './theme';
 import { UndoService } from './undo';
 
 @Component({
@@ -16,6 +17,7 @@ export class App {
   private readonly router = inject(Router);
   private readonly appRef = inject(ApplicationRef);
   protected readonly undo = inject(UndoService);
+  protected readonly themes = inject(ThemeService);
 
   /** The list in the URL; it is highlighted in the sidebar and survives a reload. */
   protected readonly activeListId = toSignal(
