@@ -5,6 +5,7 @@
 @inject TasksApi Api
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@implements IAsyncDisposable
 
 <PageTitle>@(CurrentList is null ? "Tasks" : $"{CurrentList.Name} · Tasks")</PageTitle>
 
@@ -115,6 +116,14 @@
                     {
                         <div class="task-row @RowClass(t)" data-testid="task-row-@t.Id" role="listitem" @key="t.Id"
                              @onclick="() => OpenTask(t)">
+                            @if (CurrentSort == "manual")
+                            {
+                                @* reorder.js runs the native drag; the drop calls MoveTask. *@
+                                <button type="button" class="drag-handle" data-testid="drag-handle-@t.Id" draggable="true"
+                                        aria-label="Drag to reorder @t.Title" @onclick:stopPropagation>
+                                    <svg class="icon" aria-hidden="true"><use href="icons.svg#i-drag" /></svg>
+                                </button>
+                            }
                             <input type="checkbox" class="task-check" data-testid="task-check-@t.Id" @onclick:stopPropagation
                                    checked="@t.Completed" @onchange="() => ToggleTask(t)" aria-label="Completed: @t.Title" />
                             @* Same inline editor as the list rename (inline-edit.js opens it on the double-click). *@
@@ -204,6 +213,11 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && RendererInfo.IsInteractive)
+        {
+            selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("taskReorder.register", selfRef);
+        }
         if (focusAdd && adding)
         {
             focusAdd = false;
@@ -425,6 +439,33 @@
         if (due == today) return "Today";
         if (due == today.AddDays(1)) return "Tomorrow";
         return due.Year == today.Year ? due.ToString("MMM d") : due.ToString("MMM d, yyyy");
+    }
+
+    // Drag-and-drop reorder (manual sort only): reorder.js reports the drop. The whole list
+    // (completed tasks included) is renumbered locally and sent to the API in its new order.
+    private DotNetObjectReference<Home>? selfRef;
+
+    [JSInvokable]
+    public async Task MoveTask(int fromId, int toId, bool after)
+    {
+        if (CurrentSort != "manual" || ListId is null || loadedListId != ListId) return;
+        var order = tasks.OrderBy(t => t.Position).ThenBy(t => t.Id).ToList();
+        var moved = order.Find(t => t.Id == fromId);
+        if (moved is null || !order.Any(t => t.Id == toId)) return;
+        order.Remove(moved);
+        var target = order.FindIndex(t => t.Id == toId);
+        order.Insert(after ? target + 1 : target, moved);
+        for (var i = 0; i < order.Count; i++) order[i].Position = i;
+        StateHasChanged();
+        await Api.ReorderTasksAsync(ListId.Value, order.Select(t => t.Id).ToList());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (selfRef is null) return;
+        try { await JS.InvokeVoidAsync("taskReorder.unregister", selfRef); }
+        catch (JSDisconnectedException) { }
+        selfRef.Dispose();
     }
 
     private async Task DeleteList(TaskList l)

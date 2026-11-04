@@ -119,6 +119,13 @@ public sealed class TasksApi(HttpClient http)
         using var res = await http.DeleteAsync($"api/tasks/{id}");
         res.EnsureSuccessStatusCode();
     }
+
+    /// <summary>Sets the list's manual order: positions follow the order of the ids.</summary>
+    public async Task ReorderTasksAsync(int listId, IReadOnlyList<int> orderedIds)
+    {
+        using var res = await http.PostAsJsonAsync("api/tasks/reorder", new { listId, orderedIds });
+        res.EnsureSuccessStatusCode();
+    }
 }
 
 public sealed class CompleteResult
