@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from 'react-router'
-import { api, type TaskItem, type TaskList } from './api'
+import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from 'react-router'
+import { api, type Repeat, type TaskChanges, type TaskItem, type TaskList } from './api'
 
 export default function App() {
   const [lists, setLists] = useState<TaskList[] | null>(null)
@@ -22,8 +22,8 @@ export default function App() {
       <Sidebar lists={lists ?? []} setLists={setLists} />
       <Routes>
         <Route path="/" element={<Home lists={lists} error={error} />} />
-        <Route path="/lists/:listId" element={<ListView lists={lists ?? []} setLists={setLists} />} />
-        <Route path="/lists/:listId/tasks/:taskId" element={<ListView lists={lists ?? []} setLists={setLists} />} />
+        {/* One route for the list and its panel, so opening the panel never remounts the list. */}
+        <Route path="/lists/:listId/*" element={<ListView lists={lists ?? []} setLists={setLists} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
@@ -187,7 +187,11 @@ function NameEditor(props: {
       onBlur={(e) => finish(e.currentTarget.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') finish(e.currentTarget.value)
-        else if (e.key === 'Escape') finish(null)
+        else if (e.key === 'Escape') {
+          // Escape here only cancels the edit; it must not also close the panel.
+          e.preventDefault()
+          finish(null)
+        }
       }}
     />
   )
@@ -205,6 +209,10 @@ function Home({ lists, error }: { lists: TaskList[] | null; error: string | null
 function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }) {
   const listId = Number(useParams().listId)
   const list = lists.find((l) => l.id === listId)
+  const taskMatch = useMatch('/lists/:listId/tasks/:taskId')
+  const openId = taskMatch ? Number(taskMatch.params.taskId) : null
+  const navigate = useNavigate()
+  const { search } = useLocation()
   const [loaded, setLoaded] = useState<{ listId: number; tasks: TaskItem[] } | null>(null)
 
   function setTasks(fn: (tasks: TaskItem[]) => TaskItem[]) {
@@ -241,6 +249,20 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
     replaceTask(await api.updateTask(task.id, { title }))
   }
 
+  /** Shows the change at once, then the server's version of the task. */
+  async function editTask(task: TaskItem, changes: TaskChanges) {
+    replaceTask({ ...task, ...changes })
+    replaceTask(await api.updateTask(task.id, changes))
+  }
+
+  function openTask(id: number) {
+    if (id !== openId) navigate(`/lists/${listId}/tasks/${id}${search}`)
+  }
+
+  function closePanel() {
+    navigate(`/lists/${listId}${search}`)
+  }
+
   async function deleteTask(task: TaskItem) {
     await api.deleteTask(task.id)
     setTasks((ts) => ts.filter((t) => t.id !== task.id))
@@ -261,8 +283,10 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
   // Rows of a previous list are never shown while the next one loads.
   const tasks = loaded?.listId === listId ? loaded.tasks : null
   const open = tasks?.filter((t) => !t.completed).length ?? 0
+  const openTaskItem = tasks?.find((t) => t.id === openId)
 
   return (
+    <>
     <main className="main">
       <div className="main-head">
         <h2>{list?.name ?? ''}</h2>
@@ -295,6 +319,8 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
           <TaskRow
             key={t.id}
             task={t}
+            isOpen={t.id === openId}
+            onOpen={() => openTask(t.id)}
             onToggle={() => void toggleTask(t)}
             onRename={(title) => void renameTask(t, title)}
             onDelete={() => void deleteTask(t)}
@@ -303,11 +329,22 @@ function ListView({ lists, setLists }: { lists: TaskList[]; setLists: SetLists }
         {tasks?.length === 0 && <p className="empty-state">Nothing here</p>}
       </div>
     </main>
+    {openTaskItem && (
+      <TaskPanel
+        key={openTaskItem.id}
+        task={openTaskItem}
+        onChange={(changes) => void editTask(openTaskItem, changes)}
+        onClose={closePanel}
+      />
+    )}
+    </>
   )
 }
 
 function TaskRow(props: {
   task: TaskItem
+  isOpen: boolean
+  onOpen: () => void
   onToggle: () => void
   onRename: (title: string) => void
   onDelete: () => void
@@ -316,7 +353,14 @@ function TaskRow(props: {
   const [editing, setEditing] = useState(false)
 
   return (
-    <div className={`task-row${task.completed ? ' completed' : ''}`} data-testid={`task-row-${task.id}`}>
+    <div
+      className={`task-row${task.completed ? ' completed' : ''}${isOverdue(task) ? ' overdue' : ''}${props.isOpen ? ' open' : ''}`}
+      data-testid={`task-row-${task.id}`}
+      onClick={(e) => {
+        // Clicks on the row's own controls (checkbox, delete, title editor) do not open the panel.
+        if (!(e.target as HTMLElement).closest('input, button, select, textarea')) props.onOpen()
+      }}
+    >
       <input
         type="checkbox"
         className="task-check"
@@ -341,6 +385,27 @@ function TaskRow(props: {
           task.title
         )}
       </span>
+      <span className="task-meta">
+        {task.tags.map((tag) => (
+          <span key={tag} className="tag" data-testid={`task-tag-${task.id}-${tag}`}>
+            {tag}
+          </span>
+        ))}
+        {task.dueDate && (
+          <time className="task-due" dateTime={task.dueDate} data-testid={`task-due-${task.id}`}>
+            {formatDue(task.dueDate)}
+          </time>
+        )}
+        {task.priority > 0 && (
+          <span
+            className={`prio prio-${task.priority}`}
+            role="img"
+            aria-label={`${PRIORITIES[task.priority]} priority`}
+            title={`${PRIORITIES[task.priority]} priority`}
+            data-testid={`task-priority-${task.id}`}
+          />
+        )}
+      </span>
       <button
         type="button"
         className="btn-icon btn-danger task-delete"
@@ -352,5 +417,159 @@ function TaskRow(props: {
         <Icon name="i-trash" />
       </button>
     </div>
+  )
+}
+
+const PRIORITIES = ['None', 'Low', 'Medium', 'High'] as const
+const REPEATS: { value: Repeat; label: string }[] = [
+  { value: 'none', label: 'Does not repeat' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+]
+
+/** Today as yyyy-MM-dd in the browser's time zone (due dates are plain dates). */
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function isOverdue(task: TaskItem): boolean {
+  return !task.completed && task.dueDate !== null && task.dueDate < todayIso()
+}
+
+function formatDue(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  const sameYear = y === new Date().getFullYear()
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' })
+}
+
+function TaskPanel(props: { task: TaskItem; onChange: (changes: TaskChanges) => void; onClose: () => void }) {
+  const { task, onChange, onClose } = props
+  const [tagDraft, setTagDraft] = useState('')
+
+  // Escape closes the panel unless an inline editor already handled it.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  function saveTitle(value: string) {
+    const title = value.trim()
+    if (title && title !== task.title) onChange({ title })
+  }
+
+  function addTag() {
+    const tag = tagDraft.trim().toLowerCase()
+    setTagDraft('')
+    if (tag && !task.tags.includes(tag)) onChange({ tags: [...task.tags, tag] })
+  }
+
+  function removeTag(tag: string) {
+    onChange({ tags: task.tags.filter((t) => t !== tag) })
+  }
+
+  return (
+    <aside className="panel" data-testid="task-panel" aria-label="Task details">
+      <div className="panel-head">
+        <input
+          // Remounts with the saved title when it changes elsewhere (the row's inline editor).
+          key={task.title}
+          type="text"
+          maxLength={200}
+          defaultValue={task.title}
+          aria-label="Title"
+          data-testid="panel-title"
+          onBlur={(e) => saveTitle(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') saveTitle(e.currentTarget.value)
+          }}
+        />
+        <button type="button" className="btn-icon" data-testid="panel-close" aria-label="Close details" onClick={onClose}>
+          <Icon name="i-close" />
+        </button>
+      </div>
+
+      <label htmlFor="panel-notes">Notes</label>
+      <textarea
+        key={task.notes}
+        id="panel-notes"
+        defaultValue={task.notes}
+        data-testid="panel-notes"
+        onBlur={(e) => {
+          if (e.currentTarget.value !== task.notes) onChange({ notes: e.currentTarget.value })
+        }}
+      />
+
+      <label htmlFor="panel-due">Due date</label>
+      <input
+        id="panel-due"
+        type="date"
+        value={task.dueDate ?? ''}
+        data-testid="panel-due"
+        onChange={(e) => onChange({ dueDate: e.currentTarget.value || null })}
+      />
+
+      <label htmlFor="panel-priority">Priority</label>
+      <select
+        id="panel-priority"
+        value={task.priority}
+        data-testid="panel-priority"
+        onChange={(e) => onChange({ priority: Number(e.currentTarget.value) as TaskItem['priority'] })}
+      >
+        {PRIORITIES.map((label, value) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+
+      <label htmlFor="panel-tags">Tags</label>
+      <div className="tags-box">
+        {task.tags.map((tag) => (
+          <span key={tag} className="tag" data-testid={`panel-tag-${tag}`}>
+            {tag}
+            <button type="button" aria-label={`Remove tag ${tag}`} onClick={() => removeTag(tag)}>
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          id="panel-tags"
+          type="text"
+          placeholder="Add a tag"
+          value={tagDraft}
+          data-testid="panel-tags-input"
+          onChange={(e) => setTagDraft(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addTag()
+            } else if (e.key === 'Backspace' && tagDraft === '' && task.tags.length > 0) {
+              e.preventDefault()
+              removeTag(task.tags[task.tags.length - 1])
+            }
+          }}
+        />
+      </div>
+
+      <label htmlFor="panel-repeat">Repeat</label>
+      <select
+        id="panel-repeat"
+        value={task.repeat}
+        data-testid="panel-repeat"
+        onChange={(e) => onChange({ repeat: e.currentTarget.value as Repeat })}
+      >
+        {REPEATS.map((r) => (
+          <option key={r.value} value={r.value}>
+            {r.label}
+          </option>
+        ))}
+      </select>
+    </aside>
   )
 }
