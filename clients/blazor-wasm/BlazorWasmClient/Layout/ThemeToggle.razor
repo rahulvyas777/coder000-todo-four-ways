@@ -1,0 +1,34 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<button type="button" class="btn-icon" data-testid="theme-toggle"
+        aria-label="@(_theme == "dark" ? "Switch to light theme" : "Switch to dark theme")"
+        aria-pressed="@(_theme == "dark" ? "true" : "false")" @onclick="Toggle">
+    <svg class="icon" aria-hidden="true"><use href="icons.svg#@(_theme == "dark" ? "i-sun" : "i-moon")" /></svg>
+</button>
+
+@code {
+    private IJSObjectReference? _module;
+    private string _theme = "light";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        // index.html already applied the theme; read it so the icon matches.
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/theme.js");
+        _theme = await _module.InvokeAsync<string>("current");
+        StateHasChanged();
+    }
+
+    private async Task Toggle()
+    {
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/theme.js");
+        _theme = await _module.InvokeAsync<string>("toggle");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null) return;
+        try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
+}

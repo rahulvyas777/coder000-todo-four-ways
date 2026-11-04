@@ -1,0 +1,136 @@
+using System.Net.Http.Json;
+
+namespace BlazorWasmClient.Services;
+
+/// <summary>Typed access to the Tasks API (JSON is camelCase, which the web defaults handle).</summary>
+public sealed class ApiClient(HttpClient http)
+{
+    public async Task<List<TaskList>> GetListsAsync() =>
+        await http.GetFromJsonAsync<List<TaskList>>("api/lists") ?? [];
+
+    public async Task<TaskList> CreateListAsync(string name)
+    {
+        var response = await http.PostAsJsonAsync("api/lists", new { name });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
+    public async Task<TaskList> RenameListAsync(int id, string name)
+    {
+        var response = await http.PatchAsJsonAsync($"api/lists/{id}", new { name });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
+    public async Task DeleteListAsync(int id)
+    {
+        var response = await http.DeleteAsync($"api/lists/{id}");
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task RestoreListAsync(int id)
+    {
+        var response = await http.PostAsync($"api/lists/{id}/restore", null);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Absolute URL of the export endpoint; the API answers with an attachment download.</summary>
+    public string ExportUrl(int listId, string format) =>
+        new Uri(http.BaseAddress!, $"api/lists/{listId}/export?format={format}").ToString();
+
+    /// <summary>Posts the JSON of an export file ({name, tasks}) as it is and returns the new list.</summary>
+    public async Task<TaskList> ImportListAsync(string json)
+    {
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var response = await http.PostAsync("api/lists/import", content);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskList>())!;
+    }
+
+    public async Task<List<TaskItem>> GetTasksAsync(int listId) =>
+        await http.GetFromJsonAsync<List<TaskItem>>($"api/lists/{listId}/tasks") ?? [];
+
+    public async Task<TaskItem> CreateTaskAsync(int listId, string title)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks", new { listId, title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    public async Task<TaskItem> RenameTaskAsync(int id, string title)
+    {
+        var response = await http.PatchAsJsonAsync($"api/tasks/{id}", new { title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    /// <summary>Sends only the fields set on <paramref name="patch"/> (an anonymous object).</summary>
+    public async Task<TaskItem> UpdateTaskAsync(int id, object patch)
+    {
+        var response = await http.PatchAsJsonAsync($"api/tasks/{id}", patch);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    public async Task<CompleteResult> CompleteTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/complete", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CompleteResult>())!;
+    }
+
+    public async Task<TaskItem> ReopenTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/reopen", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    /// <summary>Sets the positions of the list's tasks to the order of <paramref name="orderedIds"/>.</summary>
+    public async Task ReorderTasksAsync(int listId, IReadOnlyList<int> orderedIds)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks/reorder", new { listId, orderedIds });
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task DeleteTaskAsync(int id)
+    {
+        var response = await http.DeleteAsync($"api/tasks/{id}");
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<TaskItem> RestoreTaskAsync(int id)
+    {
+        var response = await http.PostAsync($"api/tasks/{id}/restore", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TaskItem>())!;
+    }
+
+    /// <summary>Applies <paramref name="action"/> (complete, reopen, delete, restore, move) to every task in <paramref name="ids"/>.</summary>
+    public async Task<int> BulkAsync(IReadOnlyList<int> ids, string action, int? targetListId = null)
+    {
+        var response = await http.PostAsJsonAsync("api/tasks/bulk", new { ids, action, targetListId });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<BulkResult>())!.Affected;
+    }
+
+    public async Task<Subtask> CreateSubtaskAsync(int taskId, string title)
+    {
+        var response = await http.PostAsJsonAsync($"api/tasks/{taskId}/subtasks", new { title });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task<Subtask> SetSubtaskDoneAsync(int id, bool done)
+    {
+        var response = await http.PatchAsJsonAsync($"api/subtasks/{id}", new { done });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<Subtask>())!;
+    }
+
+    public async Task DeleteSubtaskAsync(int id)
+    {
+        var response = await http.DeleteAsync($"api/subtasks/{id}");
+        response.EnsureSuccessStatusCode();
+    }
+}

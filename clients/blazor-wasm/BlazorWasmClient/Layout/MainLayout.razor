@@ -1,0 +1,11 @@
+@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Sections
+<div class="app">
+    <Sidebar />
+    <main class="main">
+        @Body
+    </main>
+    @* The detail panel is the third grid column; the list page fills it. *@
+    <SectionOutlet SectionName="task-panel" />
+</div>
+<Toast />
